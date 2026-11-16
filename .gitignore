@@ -1,17 +1,44 @@
+# Machine-specific configuration and credentials
 database.local.json
-.venv/
-__pycache__/
-*.pyc
-.idea/
+*.local.json
 .env
 .env.*
 !.env.example
-output/
-tmp/
-flower_cbir/data/*
-!flower_cbir/data/README.md
-flower_cbir/models/*
-!flower_cbir/models/README.md
-trich_rut_minh/*.csv
-trich_rut_minh/extraction_manifest*.json
+
+# Local environments, IDE state and Python caches
+.venv/
+.idea/
+.vscode/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local-only tests and diagnostics (kept on this machine)
+/tests/
+/test_*.py
+/check_*.py
+/debug_*.py
+/profile_*.py
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Generated reports, temporary documents, logs and recovery snapshots
+/output/
+/tmp/
+/reports/
+/notes/
+*.local.md
 *.log
+*.tmp
+*.bak
+
+# Runtime artifacts and large weights are supplied/generated separately
+/flower_cbir/data/
+/flower_cbir/models/*
+!/flower_cbir/models/README.md
+/trich_rut_minh/*.csv
+/trich_rut_minh/extraction_manifest*.json

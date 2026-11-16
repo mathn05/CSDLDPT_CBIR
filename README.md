@@ -22,14 +22,16 @@ Môi trường `.venv` chạy ứng dụng, OpenCV, NumPy và PostgreSQL. DeepLa
 # Kiểm tra thực tế toàn bộ kho bằng cách chạy lại DeepLabv3 và hai API trích rút
 .venv/Scripts/python.exe main.py --verify-sync
 
-# Kiểm thử nhanh
-.venv/Scripts/python.exe -m unittest discover -s tests -v
+# Kiểm tra tính toàn vẹn của index đang phục vụ
+.venv/Scripts/python.exe main.py --test
 
 # Chọn trọng số trên validation và đánh giá test; không đổi công thức đặc trưng
 .venv/Scripts/python.exe main.py --evaluate
 ```
 
 `--index` bây giờ đồng bộ cả đặc trưng thô, tham số chuẩn hóa, vector chuẩn hóa và phiên bản đang phục vụ trong PostgreSQL. Nó cũng xuất CSV cùng phiên bản. Không chỉ tạo một index NumPy riêng như trước. Chạy lại khi dữ liệu không đổi sẽ dùng mask/vector đã xác minh; không tạo normalization mới vô ích.
+
+Repository giữ mã chương trình, công cụ CSV/PostgreSQL, script huấn luyện và hướng dẫn cần thiết. Bộ test local, báo cáo sinh ra, tài liệu nháp, backup, cache, dữ liệu ảnh và checkpoint được bỏ qua bằng `.gitignore`. Các test local đang có trên máy vẫn chạy được bằng `python -m unittest discover -s tests -v`.
 
 ## Quy tắc ảnh và mask
 
