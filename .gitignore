@@ -1,0 +1,17 @@
+database.local.json
+.venv/
+__pycache__/
+*.pyc
+.idea/
+.env
+.env.*
+!.env.example
+output/
+tmp/
+flower_cbir/data/*
+!flower_cbir/data/README.md
+flower_cbir/models/*
+!flower_cbir/models/README.md
+trich_rut_minh/*.csv
+trich_rut_minh/extraction_manifest*.json
+*.log

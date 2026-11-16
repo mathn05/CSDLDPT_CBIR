@@ -1,0 +1,145 @@
+{
+  "pipeline_version": "3.0.0",
+  "name": "flower_cbir_163d",
+  "description": "Report 1 feature formulas, shared DeepLabV3 segmentation and versioned PostgreSQL index",
+  "image_size": [
+    384,
+    384
+  ],
+  "dataset": {
+    "image_dir": "../postgres_data/image_384",
+    "mask_dir": "flower_cbir/data/deeplab_masks",
+    "expected_count": 1000,
+    "labels_mat": "../imagelabels.mat",
+    "label_provenance": "provisional_filename_mapping",
+    "reference_mask_dir": "../postgres_data/final_segmentation_1",
+    "mask_source": "deeplabv3"
+  },
+  "segmentation": {
+    "method": "deeplabv3",
+    "initial_rect": [
+      8,
+      8,
+      368,
+      368
+    ],
+    "iter_count": 5,
+    "seed": 42,
+    "checkpoint": "flower_cbir/models/deeplabv3_flower_v3.pt",
+    "python_executable": "../deeplabv3/.venv/Scripts/python.exe",
+    "device": "cuda"
+  },
+  "geometry": {
+    "b5_kernel_shape": "ellipse",
+    "b5_kernel_size": [
+      5,
+      5
+    ],
+    "erode_iterations": 1
+  },
+  "features": {
+    "total_dims": 163,
+    "groups": {
+      "F1": {
+        "name": "Overall Color",
+        "slice": [
+          0,
+          78
+        ],
+        "dims": 78,
+        "is_histogram": true,
+        "subgroups": {
+          "HS": [
+            0,
+            72
+          ],
+          "V": [
+            72,
+            78
+          ]
+        }
+      },
+      "F2": {
+        "name": "Color by Radius Ring (Lab)",
+        "slice": [
+          78,
+          96
+        ],
+        "dims": 18,
+        "is_histogram": false,
+        "num_rings": 3
+      },
+      "F3": {
+        "name": "Surface Texture (Multi-Radius LBP)",
+        "slice": [
+          96,
+          124
+        ],
+        "dims": 28,
+        "is_histogram": true,
+        "subgroups": {
+          "LBP8": [
+            96,
+            106
+          ],
+          "LBP16": [
+            106,
+            124
+          ]
+        }
+      },
+      "F4": {
+        "name": "Shape and Internal Structure",
+        "slice": [
+          124,
+          163
+        ],
+        "dims": 39,
+        "is_histogram": false,
+        "subgroups": {
+          "scalars": [
+            124,
+            128
+          ],
+          "fourier": [
+            128,
+            140
+          ],
+          "iap": [
+            140,
+            156
+          ],
+          "iep": [
+            156,
+            163
+          ]
+        }
+      }
+    }
+  },
+  "distance": {
+    "weights": {
+      "w1": 0.05,
+      "w2": 0.3,
+      "w3": 0.2,
+      "w4": 0.45
+    },
+    "f1_method": "hellinger_avg",
+    "f2_method": "rms_transformed",
+    "f3_method": "hellinger_avg",
+    "f4_method": "block_rms_avg"
+  },
+  "epsilon": 1e-12,
+  "preprocessing": {
+    "crop_margin": 1.1,
+    "padding_rgb": [
+      128,
+      128,
+      128
+    ],
+    "prepared_size": [
+      384,
+      384
+    ]
+  }
+}
