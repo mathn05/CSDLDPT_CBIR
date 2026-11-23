@@ -8,6 +8,7 @@ from flower_cbir.core.deeplab import run_deeplab
 from flower_cbir.core.features import extract_all_features
 from flower_cbir.core.preprocess import load_image, resize_image, square_crop_bounds, crop_with_padding
 from flower_cbir.core.segmentation import clean_mask, create_mask_overlay
+from flower_cbir.settings import load_config
 
 
 def prepare_image(source, supplied_mask=None, flower_box=None, crop_box=None):
@@ -60,7 +61,7 @@ def extract_image(source, supplied_mask=None, flower_box=None, crop_box=None):
     started = time.perf_counter()
     if mask is None:
         mask, overlay, model_info = run_deeplab(rgb)
-        segmentation = {'method': 'deeplabv3', **model_info}
+        segmentation = {'method': load_config()['segmentation']['method'], **model_info}
     else:
         overlay = create_mask_overlay(rgb, mask)
         segmentation = {'method': 'supplied_mask'}

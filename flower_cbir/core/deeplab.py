@@ -28,7 +28,12 @@ class DeepLabSegmenter:
         log = PROJECT_ROOT / 'output/logs/deeplab_worker.log'
         log.parent.mkdir(parents=True, exist_ok=True)
         self.log_stream = log.open('a', encoding='utf-8')
-        command = [self.executable, '-u', str(Path(__file__).with_name('deeplab_worker.py')),
+        worker = (Path(config['worker'])
+                  if config['method'] == 'deeplabv3plus_v2'
+                  else Path(__file__).with_name('deeplab_worker.py'))
+        if not worker.is_file():
+            raise FileNotFoundError(f'Missing segmentation worker: {worker}')
+        command = [self.executable, '-u', str(worker),
                    '--checkpoint', str(self.checkpoint), '--device', config['device']]
         self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=self.log_stream, text=True, encoding='utf-8', bufsize=1,
@@ -46,6 +51,13 @@ class DeepLabSegmenter:
         if self.info['checkpoint_sha256'] != config['_checkpoint_sha256']:
             self.close()
             raise RuntimeError('DeepLabV3 checkpoint changed while loading.')
+        if config['method'] == 'deeplabv3plus_v2':
+            from flower_cbir.core.contract import file_sha256
+            if (self.info.get('model_config_sha256') != file_sha256(config['active_model_config'])
+                    or self.info.get('postprocessing_sha256') != file_sha256(config['postprocessing_path'])
+                    or self.info.get('postprocessing') != config['postprocessing']):
+                self.close()
+                raise RuntimeError('Selected model or postprocessing differs from CBIR configuration.')
 
     def _read(self):
         try:
@@ -91,8 +103,8 @@ def _get_segmenter(configuration):
 def get_segmenter():
     from flower_cbir.core.contract import file_sha256
     config = load_config()['segmentation']
-    if config['method'] != 'deeplabv3':
-        raise ValueError('This report-defined pipeline requires DeepLabV3; no silent fallback is allowed.')
+    if config['method'] not in ('deeplabv3', 'deeplabv3plus_v2'):
+        raise ValueError('Unsupported segmentation method; no silent fallback is allowed.')
     config['_checkpoint_sha256'] = file_sha256(PROJECT_ROOT / config['checkpoint'])
     key=json.dumps(config,sort_keys=True)
     segmenter=_get_segmenter(key)

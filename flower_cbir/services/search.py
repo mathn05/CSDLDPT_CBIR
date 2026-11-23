@@ -8,6 +8,7 @@ from flower_cbir.core.distance import compute_overall_distance
 from flower_cbir.settings import default_weights, validate_weights, load_config
 from flower_cbir.core.pipeline import extract_image
 from flower_cbir.core.contract import verify_contract, file_sha256
+from flower_cbir.core.segmentation import clean_mask
 
 
 class FlowerSearchEngine:
@@ -131,11 +132,13 @@ class FlowerSearchEngine:
                top_k: int = 5,
                leave_one_out: bool = False,
                query_filename: str = None,
-               flower_box=None):
+               flower_box=None,
+               use_gallery_mask: bool = True):
         """
         Full end-to-end query workflow:
         1. Preprocess query image -> 384x384 RGB.
-        2. DeepLabV3 segmentation (or a supplied mask in the same coordinates).
+        2. Use the cached model mask for an unchanged gallery image; otherwise
+           run the same DeepLabV3+ model and mask postprocessing.
         3. Feature extraction (163 dimensions) + explanation signals.
         4. Normalization.
         5. Vectorized distance search against index.
@@ -146,7 +149,13 @@ class FlowerSearchEngine:
             verify_contract(self.contract)
             from flower_cbir.core.deeplab import get_segmenter
             if get_segmenter().info != self.manifest['model_runtime']:
-                raise ValueError('DeepLabV3 runtime differs from this index. Synchronize before querying.')
+                raise ValueError('DeepLabV3+ runtime differs from this index. Synchronize before querying.')
+            if flower_box is None and crop_box is None:
+                gallery_item = self.match_source(query_source)
+                if gallery_item is not None and query_mask is None and use_gallery_mask:
+                    from PIL import Image
+                    with Image.open(gallery_item['mask_path']) as saved:
+                        query_mask = np.asarray(saved.convert('L'))
         weights = default_weights() if weights is None else validate_weights(weights)
         total_start = time.perf_counter()
         query_info = extract_image(query_source,supplied_mask=query_mask,flower_box=flower_box,crop_box=crop_box)
@@ -154,18 +163,16 @@ class FlowerSearchEngine:
         img_rgb = query_info['image_rgb']
         matched = self.pixel_lookup.get(hashlib.sha256(img_rgb.tobytes()).hexdigest())
         if self.contract is not None and query_mask is not None:
-            # A supplied mask is a cache/verification input, not an alternate
-            # segmentation algorithm hidden behind the production query API.
-            if matched is not None:
-                from PIL import Image
-                if file_sha256(matched['mask_path']) != matched['mask_sha256']:
-                    raise ValueError('The stored DeepLabV3 mask changed after index publication.')
-                expected_mask=np.asarray(Image.open(matched['mask_path']).convert('L'))
-            else:
-                expected_mask=get_segmenter().predict(img_rgb)
+            if matched is None:
+                raise ValueError('A supplied mask is allowed only for a matching gallery image.')
+            from PIL import Image
+            if file_sha256(matched['mask_path']) != matched['mask_sha256']:
+                raise ValueError('The stored gallery mask changed after index publication.')
+            with Image.open(matched['mask_path']) as saved:
+                expected_mask = clean_mask(np.asarray(saved.convert('L')))
             if not np.array_equal(query_info['mask_binary'],expected_mask):
-                raise ValueError('The supplied query mask differs from the report-defined DeepLabV3 prediction.')
-            query_info['segmentation']={'method':'verified_deeplabv3_mask',**get_segmenter().info}
+                raise ValueError('The supplied query mask differs from the stored model mask.')
+            query_info['segmentation']={'method':'cached_deeplabv3plus_v2_mask'}
         t0 = time.perf_counter()
         norm_vector = self.normalizer.transform(query_info['raw_vector'])
         timings["normalization_ms"] = (time.perf_counter() - t0) * 1000.0

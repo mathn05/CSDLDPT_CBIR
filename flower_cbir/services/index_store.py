@@ -15,7 +15,7 @@ from flower_cbir.settings import PROJECT_ROOT
 
 def backup_database(repository):
     snapshot = {'format': 'cbir-postgres-snapshot-v1', 'schema': repository.schema, 'tables': {}}
-    names = ['flower_images', 'flower_features', 'feature_normalization', 'normalized_features',
+    names = ['flower_images', 'flower_masks', 'flower_features', 'feature_normalization', 'normalized_features',
              'retrieval_history', 'cbir_index_versions', 'cbir_index_entries']
     with repository.conn.transaction():
         repository.conn.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY')
@@ -68,7 +68,7 @@ def _relative(path):
     return Path(os.path.relpath(Path(path).resolve(), PROJECT_ROOT)).as_posix()
 
 
-def publish_index(repository, data):
+def publish_index(repository, data, *, replace_all=False, backup_artifact=None):
     contract = verify_contract(data['contract'])
     raw = np.asarray(data['raw_features'], dtype=np.float32)
     normalized = np.asarray(data['normalized_features'], dtype=np.float32)
@@ -82,9 +82,10 @@ def publish_index(repository, data):
         for key in ['image', 'mask']:
             if file_sha256(item[key+'_path']) != item[key+'_sha256']:
                 raise ValueError(f'Source changed since extraction: {item["filename"]}, {key}')
-        if item.get('mask_provenance') != 'deeplabv3':
-            raise ValueError('Only verified DeepLabV3 masks can be published in this report pipeline.')
-    if repository.active_version() == data['version_id']:
+        if item.get('mask_provenance') not in ('deeplabv3', 'reviewed_final_segmentation_v2',
+                                                'deeplabv3plus_v2_postprocessed'):
+            raise ValueError('Only verified model masks or reviewed v2 ground truth may be published.')
+    if not replace_all and repository.active_version() == data['version_id']:
         existing = repository.load_index()
         by_name = {m['filename']:i for i,m in enumerate(existing['metadata'])}
         if len(by_name) != len(metadata) or any(
@@ -92,11 +93,20 @@ def publish_index(repository, data):
             for i,m in enumerate(metadata)):
             raise ValueError('The active immutable version differs from the publication batch.')
         return {'version_id':data['version_id'],'already_active':True,'rows':len(metadata)}
-    backup = backup_database(repository)
+    if replace_all:
+        backup = Path(backup_artifact).resolve() if backup_artifact is not None else None
+        if backup is None or not backup.is_file() or backup.stat().st_size == 0:
+            raise ValueError('A validated pg_dump backup is required before replacing all tables.')
+    else:
+        backup = backup_database(repository)
     connection = repository.conn
     with repository.lock, connection.transaction():
         connection.execute("SELECT pg_advisory_xact_lock(hashtext('cbir_publish_index'))")
         ensure_schema(connection)
+        if replace_all:
+            connection.execute('''TRUNCATE TABLE retrieval_history,cbir_index_entries,
+                cbir_index_versions,normalized_features,flower_features,flower_masks,
+                flower_images,feature_normalization RESTART IDENTITY CASCADE''')
         connection.execute('LOCK TABLE flower_images,flower_features,feature_normalization,normalized_features IN SHARE ROW EXCLUSIVE MODE')
         existing_names = {row[0] for row in connection.execute('SELECT filename FROM flower_images').fetchall()}
         if existing_names - {m['filename'] for m in metadata}:
@@ -118,13 +128,15 @@ def publish_index(repository, data):
             ''',(data['version_id'],normalization_id,Jsonb(contract),Jsonb(data['manifest']),Jsonb(data['normalizer'].to_dict())))
         for index,item in enumerate(metadata):
             identity = connection.execute('''
-                INSERT INTO flower_images (filename,image_path,mask_path,width,height,image_format)
-                VALUES (%s,%s,%s,384,384,%s)
+                INSERT INTO flower_images (filename,image_path,mask_path,width,height,image_format,image_data)
+                VALUES (%s,%s,%s,384,384,%s,%s)
                 ON CONFLICT (filename) DO UPDATE SET image_path=EXCLUDED.image_path,
-                    mask_path=EXCLUDED.mask_path,width=384,height=384,image_format=EXCLUDED.image_format
+                    mask_path=EXCLUDED.mask_path,width=384,height=384,image_format=EXCLUDED.image_format,
+                    image_data=EXCLUDED.image_data
                 RETURNING image_id
             ''',(item['filename'],_relative(item['image_path']),_relative(item['mask_path']),
-                 Path(item['image_path']).suffix.lstrip('.').upper())).fetchone()[0]
+                 Path(item['image_path']).suffix.lstrip('.').upper(),
+                 Path(item['image_path']).read_bytes())).fetchone()[0]
             connection.execute('''
                 INSERT INTO flower_features (image_id,hs_histogram,v_histogram,lab_mean,lab_std,lbp_histogram,
                     circularity,solidity,aspect_ratio,rotated_extent,radial_spectrum,iap,iep)
@@ -136,11 +148,20 @@ def publish_index(repository, data):
                     radial_spectrum=EXCLUDED.radial_spectrum,iap=EXCLUDED.iap,iep=EXCLUDED.iep,extracted_at=CURRENT_TIMESTAMP
             ''',(identity,*feature_columns(raw[index])))
             connection.execute('''
-                INSERT INTO normalized_features (image_id,normalization_id,normalized_vector)
-                VALUES (%s,%s,%s)
+                INSERT INTO flower_masks (image_id,mask_data,mask_format,mask_sha256,source_version)
+                VALUES (%s,%s,'PNG',%s,%s)
+                ON CONFLICT (image_id) DO UPDATE SET mask_data=EXCLUDED.mask_data,
+                    mask_format=EXCLUDED.mask_format,mask_sha256=EXCLUDED.mask_sha256,
+                    source_version=EXCLUDED.source_version,updated_at=CURRENT_TIMESTAMP
+            ''',(identity,Path(item['mask_path']).read_bytes(),item['mask_sha256'],
+                 item['mask_provenance']))
+            connection.execute('''
+                INSERT INTO normalized_features (image_id,normalization_id,normalized_vector,pgvector_embedding)
+                VALUES (%s,%s,%s,%s::vector(163))
                 ON CONFLICT (image_id) DO UPDATE SET normalization_id=EXCLUDED.normalization_id,
-                    normalized_vector=EXCLUDED.normalized_vector,created_at=CURRENT_TIMESTAMP
-            ''',(identity,normalization_id,normalized[index].tolist()))
+                    normalized_vector=EXCLUDED.normalized_vector,
+                    pgvector_embedding=EXCLUDED.pgvector_embedding,created_at=CURRENT_TIMESTAMP
+            ''',(identity,normalization_id,normalized[index].tolist(),normalized[index].tolist()))
             record = {**item,'image_id':identity,'image_path':_relative(item['image_path']),
                       'mask_path':_relative(item['mask_path'])}
             connection.execute('''
@@ -152,7 +173,8 @@ def publish_index(repository, data):
         if count != len(metadata):
             raise ValueError('Incomplete immutable version; refusing activation.')
         actual = connection.execute('''
-            SELECT i.filename,e.raw_vector,e.normalized_vector,n.normalized_vector
+            SELECT i.filename,e.raw_vector,e.normalized_vector,n.normalized_vector,
+                   n.pgvector_embedding::real[]
             FROM cbir_index_entries e JOIN flower_images i ON i.image_id=e.image_id
             JOIN normalized_features n ON n.image_id=i.image_id AND n.normalization_id=%s
             WHERE e.version_id=%s
@@ -161,8 +183,9 @@ def publish_index(repository, data):
         if len(actual)!=len(metadata) or any(
             not np.array_equal(raw[positions[name]],np.asarray(rv,np.float32)) or
             not np.array_equal(normalized[positions[name]],np.asarray(nv,np.float32)) or
-            not np.array_equal(normalized[positions[name]],np.asarray(legacy_nv,np.float32))
-            for name,rv,nv,legacy_nv in actual):
+            not np.array_equal(normalized[positions[name]],np.asarray(legacy_nv,np.float32)) or
+            not np.array_equal(normalized[positions[name]],np.asarray(pgvector_nv,np.float32))
+            for name,rv,nv,legacy_nv,pgvector_nv in actual):
             raise ValueError('Database round-trip differs from the staged batch; activation refused.')
         # Check the contract again before committing a potentially long import.
         verify_contract(contract)

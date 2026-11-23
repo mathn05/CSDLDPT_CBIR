@@ -1,13 +1,13 @@
-# Checkpoint DeepLabv3
+# Checkpoint phân đoạn đang dùng
 
-Trọng số và dữ liệu huấn luyện không được commit vào Git. Để chạy bản cấu hình hiện tại, đặt checkpoint inference-only đã được huấn luyện tại:
+Ứng dụng CBIR hiện dùng DeepLabV3+ 384 v2 đã chọn trong `D:\CSDLDPT\cau_3\active_deeplab_model.json`:
 
-`flower_cbir/models/deeplabv3_flower_v3.pt`
+`D:\CSDLDPT\cau_3\deeplabv3plus_384_v2_finetuned\best_deeplabv3plus.pt`
 
-SHA256 của checkpoint đã kiểm chứng trên máy phát triển:
+Checkpoint này dự đoán mask cho **cả 1.000 ảnh kho và ảnh truy vấn mới**. Worker tại `D:\CSDLDPT\cau_3\cbir_deeplabv3plus_worker.py` gọi `mask_postprocessing.py` với ngưỡng 0,45 và các tham số trong `flower_cbir/config/pipeline.json`. Ứng dụng giữ thành phần liên thông lớn nhất trước khi trích rút 163 đặc trưng. Mask đã duyệt ở `D:\CSDLDPT\final_segmentation_v2` chỉ dùng làm nhãn tham chiếu để đánh giá chất lượng phân đoạn.
 
-`15142c42782958026c11e8d316d79e62a59fc9fd9817946d0a1c9ce7c784c062`
+Mã ứng dụng kiểm tra SHA256 của checkpoint, cấu hình model, worker và hậu xử lý khi nạp phiên bản chỉ mục. Trọng số không được commit vào Git.
 
-Checkpoint chứa state dict `model` của DeepLabV3 ResNet50 hai lớp, có auxiliary head. Có thể chuyển checkpoint huấn luyện đáng tin cậy bằng `tools/export_deeplab_checkpoint.py`; hoặc chuẩn bị dữ liệu và tinh chỉnh bằng các script trong `tools`, như hướng dẫn ở README gốc.
+Checkpoint `deeplabv3_flower_v3.pt` trước đây thuộc thí nghiệm DeepLabV3 ResNet50 và **không phải** model đang dùng.
 
-Khi dùng checkpoint khác, cập nhật `segmentation.checkpoint` và môi trường PyTorch trong `flower_cbir/config/pipeline.json`, rồi dựng lại index và kiểm tra đồng bộ. Không trộn vector của hai checkpoint.
+Khi chọn checkpoint khác, cần kiểm tra lại luồng query và xuất bản một phiên bản chỉ mục có contract tương ứng.

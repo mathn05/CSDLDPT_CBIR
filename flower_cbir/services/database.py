@@ -17,9 +17,22 @@ from flower_cbir.settings import PROJECT_ROOT, load_config
 
 def load_database_config():
     path = PROJECT_ROOT / 'database.local.json'
-    if not path.exists():
-        raise ValueError('Create database.local.json from database.example.json and fill in your PostgreSQL connection details.')
-    config = json.loads(path.read_text(encoding='utf-8-sig'))
+    if path.exists():
+        config = json.loads(path.read_text(encoding='utf-8-sig'))
+    else:
+        env_path = Path(os.environ.get('CBIR_DATABASE_ENV',
+            r'D:\CSDLDPT\flower_features\cau3_postgres\.env'))
+        if not env_path.is_file():
+            raise ValueError('Missing database.local.json and CBIR PostgreSQL .env file.')
+        settings = {}
+        for line in env_path.read_text(encoding='utf-8-sig').splitlines():
+            key, separator, value = line.partition('=')
+            if separator and not key.strip().startswith('#'):
+                settings[key.strip()] = value.strip()
+        config = {'host': settings.get('DB_HOST', 'localhost'),
+                  'port': int(settings.get('DB_PORT', '5432')),
+                  'dbname': settings.get('DB_NAME'), 'user': settings.get('DB_USER'),
+                  'password': settings.get('DB_PASSWORD'), 'schema': 'public'}
     for name, variable in [('host', 'PGHOST'), ('port', 'PGPORT'), ('dbname', 'PGDATABASE'), ('user', 'PGUSER'), ('password', 'PGPASSWORD')]:
         if variable in os.environ:
             config[name] = os.environ[variable]
@@ -133,9 +146,9 @@ class FlowerDatabase:
                 'normalizer':normalizer,'version_id':version_id,'contract':contract,
                 'manifest':manifest,'normalization_id':normalization_id}
 
-    def publish_index(self, data):
+    def publish_index(self, data, *, replace_all=False, backup_artifact=None):
         from flower_cbir.services.index_store import publish_index
-        return publish_index(self,data)
+        return publish_index(self,data,replace_all=replace_all,backup_artifact=backup_artifact)
 
     def log_retrieval(self, query_filename, query_norm_vec, top5_results, weights, execution_ms, version_id=None, query_context=None):
         vector = query_norm_vec.tolist() if query_norm_vec is not None else []

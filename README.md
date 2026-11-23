@@ -1,82 +1,152 @@
-# CBIR ảnh hoa theo Báo cáo lần 1
+# htdpt
 
-Chương trình truy vấn và công cụ `trich_rut_minh` dùng **cùng mã nguồn** cho tiền xử lý, DeepLabv3, làm sạch mask, hình học, F1–F4 và chuẩn hóa. Không sao chép lại các công thức vào script export/import.
+Hệ Thống Cơ Sở Dữ Liệu Lưu Trữ và Tìm Kiếm Ảnh Bông Hoa (Content-Based Image Retrieval - CBIR)
 
-## Chạy trên máy hiện tại
+Đề tài Bài tập lớn môn học **Hệ Cơ Sở Dữ Liệu Đa Phương Tiện (HCSDLDPT)** — Học viện Công nghệ Bưu chính Viễn thông (PTIT).
 
-Môi trường `.venv` chạy ứng dụng, OpenCV, NumPy và PostgreSQL. DeepLabv3 chạy bằng môi trường PyTorch/GPU đã có tại `../deeplabv3/.venv`; đường dẫn được cấu hình trong `flower_cbir/config/pipeline.json`. Worker giữ model trong bộ nhớ và dùng float32, chế độ eval, các phép tính xác định. Cả hai công cụ gọi cùng worker và cùng checkpoint.
+---
 
-```powershell
-# Xây dựng mask DeepLabv3, đặc trưng, CSV và đồng bộ cả PostgreSQL
-.venv/Scripts/python.exe main.py --index
+## 📌 Tổng quan Hệ thống
 
-# Mở giao diện
-.venv/Scripts/python.exe main.py --app
+Hệ thống cung cấp giải pháp toàn diện cho bài toán quản lý, phân đoạn và truy hồi ảnh hoa theo nội dung:
+1. **Phân đoạn ngữ nghĩa tự động (Câu 3)**: Sử dụng mô hình mạng nơ-ron tích chập sâu **DeepLabV3+** ($384 \times 384$) kết hợp bộ lọc hậu xử lý chuyên biệt (`mask_postprocessing`) để tách chính xác bông hoa khỏi nền phức tạp.
+2. **Trích rút đặc trưng 163 chiều chuẩn mực**: Triển khai thuật toán trích rút 12 thuộc tính thuộc 4 nhóm đặc trưng:
+   - **F1 (Màu sắc HSV toàn cục — 78 chiều)**: Biểu đồ kết hợp H–S ($72\text{D}$) và V ($6\text{D}$).
+   - **F2 (Màu sắc Lab theo 3 vành bán kính — 18 chiều)**: Giá trị Mean và Std Lab trên 3 vùng phân vị.
+   - **F3 (Kết cấu bề mặt LBP bất biến quay — 28 chiều)**: Biểu đồ đa tỷ lệ $\text{LBP}_{8,1}^{riu2}$ ($10\text{D}$) và $\text{LBP}_{16,2}^{riu2}$ ($18\text{D}$).
+   - **F4 (Hình dạng & Cấu trúc hoa — 39 chiều)**: 4 chỉ số hình học vô hướng, phổ Fourier bán kính ($12\text{D}$), mô hình góc nội gradient IAP ($16\text{D}$), mô hình mật độ cạnh IEP ($7\text{D}$).
+3. **Độ đo khoảng cách kết hợp**: So sánh biểu đồ xác suất bằng khoảng cách **Hellinger** ($D_1, D_3$) và so sánh giá trị số liên tục bằng khoảng cách **RMS biến đổi** ($D_2, D_4$), kết hợp trọng số người dùng tùy biến.
+4. **Hệ thống CSDL & Web App hoàn chỉnh**: Lưu trữ trên PostgreSQL (7 bảng quản lý ảnh, đặc trưng, phiên bản index và lịch sử tìm kiếm) kết hợp giao diện Streamlit tương tác mượt mà.
 
-# Ảnh mới: tự động phân đoạn và truy vấn
-.venv/Scripts/python.exe main.py --search path/to/flower.jpg
+---
 
-# Nếu cần chỉ rõ bounding box bông hoa trong hệ tọa độ ảnh gốc
-.venv/Scripts/python.exe main.py --search path/to/flower.jpg --flower-box 30 20 400 350
+## 📂 Cấu trúc Thư mục Dự án
 
-# Kiểm tra thực tế toàn bộ kho bằng cách chạy lại DeepLabv3 và hai API trích rút
-.venv/Scripts/python.exe main.py --verify-sync
-
-# Kiểm tra tính toàn vẹn của index đang phục vụ
-.venv/Scripts/python.exe main.py --test
-
-# Chọn trọng số trên validation và đánh giá test; không đổi công thức đặc trưng
-.venv/Scripts/python.exe main.py --evaluate
+```text
+htdpt/
+├── README.md                          # Giới thiệu và hướng dẫn tổng thể dự án
+├── requirements.txt                   # Danh sách thư viện Python cần thiết
+├── database.example.json              # Mẫu tệp cấu hình kết nối PostgreSQL
+├── main.py                            # Điểm khởi chạy chính (--app, --index, --search)
+│
+├── flower_cbir/                       # [HỆ THỐNG CBIR HOÀN THÀNH]
+│   ├── app.py                         # Giao diện tìm kiếm trực quan Streamlit
+│   ├── settings.py                    # Cấu hình chung của ứng dụng
+│   ├── config/
+│   │   └── pipeline.json              # Cấu hình tham số toàn bộ pipeline
+│   ├── core/                          # Lõi thuật toán CBIR
+│   │   ├── distance.py                # Hàm đo khoảng cách Hellinger + RMS biến đổi
+│   │   ├── segmentation.py            # Giao diện phân đoạn ảnh
+│   │   ├── deeplab.py                 # Wrapper mô hình DeepLabV3+
+│   │   ├── deeplab_worker.py          # Worker tiến trình chạy phân đoạn
+│   │   ├── schema.py                  # Định nghĩa và kiểm thực vector 163D
+│   │   ├── normalization.py           # Chuẩn hóa Z-score chọn lọc (F2 & F4)
+│   │   └── features.py                # Tính toán 4 nhóm đặc trưng
+│   ├── services/                      # Tầng dịch vụ hệ thống
+│   │   ├── database.py                # Quản lý kết nối và truy vấn PostgreSQL
+│   │   ├── search.py                  # Lõi xếp hạng Top-K tương đồng
+│   │   ├── index_store.py             # Xuất bản và xác thực chỉ mục vào DB
+│   │   └── verification.py            # Kiểm thử tính toàn vẹn hệ thống
+│   └── evaluation/                    # Đánh giá độ đo truy hồi (Precision/Recall)
+│
+├── cau_3/                             # [CÂU 3: DEEPLABV3+ & HẬU XỬ LÝ CHUẨN]
+│   ├── README.md                      # Hướng dẫn chi tiết Câu 3
+│   ├── TRAINING_384_RESULTS.md        # Báo cáo kết quả huấn luyện mô hình
+│   ├── mask_postprocessing.py         # Bộ lọc hậu xử lý chuẩn (threshold 0.45, repair_center, keep_nearby)
+│   ├── active_deeplab_model.py        # Module nạp model kích hoạt
+│   ├── active_deeplab_model.json      # Khai báo model kích hoạt mặc định
+│   ├── predict_deeplab_1000.py        # Phân đoạn tự động cho 1.000 ảnh CSDL
+│   ├── predict_new_flowers.py         # Phân đoạn cho ảnh hoa mới bất kỳ
+│   ├── finetune_deeplabv3plus_v2.py   # Huấn luyện fine-tune DeepLabV3+
+│   ├── train_flower_deeplabv3plus.py  # Định nghĩa kiến trúc mạng DeepLabV3+
+│   ├── deeplabv3plus_384_v2_finetuned/# Checkpoint mô hình chính thức (mIoU 98.50%)
+│   │   └── best_deeplabv3plus.pt      # Trọng số mô hình đã huấn luyện (0.93 MB)
+│   └── 14_anh_moi/                    # Bộ 14 ảnh hoa mới dùng kiểm thử thực nghiệm
+│       ├── images/                    # 14 ảnh hoa gốc 384x384
+│       ├── masks/                     # 14 mặt nạ phân đoạn chuẩn
+│       ├── cutouts/                   # 14 ảnh hoa tách nền trong suốt
+│       ├── overlays/                  # 14 ảnh phủ viền đối chiếu
+│       └── README.md                  # Danh mục thông tin chi tiết
+│
+├── trich_rut_minh/                    # [TRÍCH RÚT ĐẶC TRƯNG 163 CHIỀU]
+│   ├── full_163.py                    # Thuật toán trích rút F1..F4 163 chiều (bản chuẩn CBIR)
+│   ├── features_163.csv               # Bảng vector đặc trưng của 1.000 ảnh
+│   ├── extraction_manifest_163.json   # Siêu dữ liệu kiểm tra toàn vẹn
+│   └── README.md                      # Hướng dẫn sử dụng công cụ dòng lệnh
+│
+├── database/                          # [CƠ SỞ DỮ LIỆU POSTGRESQL]
+│   └── schema.sql                     # Cấu trúc bảng CSDL chuẩn mực
+│
+└── tools/                             # Công cụ bổ trợ trích xuất & kiểm thử
+    ├── export_deeplab_checkpoint.py
+    ├── finetune_deeplab.py
+    └── prepare_segmentation_data.py
 ```
 
-`--index` bây giờ đồng bộ cả đặc trưng thô, tham số chuẩn hóa, vector chuẩn hóa và phiên bản đang phục vụ trong PostgreSQL. Nó cũng xuất CSV cùng phiên bản. Không chỉ tạo một index NumPy riêng như trước. Chạy lại khi dữ liệu không đổi sẽ dùng mask/vector đã xác minh; không tạo normalization mới vô ích.
+---
 
-Repository giữ mã chương trình, công cụ CSV/PostgreSQL, script huấn luyện và hướng dẫn cần thiết. Bộ test local, báo cáo sinh ra, tài liệu nháp, backup, cache, dữ liệu ảnh và checkpoint được bỏ qua bằng `.gitignore`. Các test local đang có trên máy vẫn chạy được bằng `python -m unittest discover -s tests -v`.
+## 🚀 Hướng dẫn Cài đặt & Khởi chạy
 
-## Quy tắc ảnh và mask
+### 1. Cài đặt Môi trường
+Khuyến nghị sử dụng Python 3.10 trở lên:
+```bash
+python -m venv .venv
+source .venv/bin/activate       # Trên Linux/macOS
+.venv\Scripts\activate          # Trên Windows
 
-Kho dữ liệu đầu vào là các ảnh **RGB PNG 384×384 đã chuẩn bị theo báo cáo**. Ảnh này được giữ nguyên để không crop hai lần. Nếu đưa một ảnh 384×384 chưa có bố cục chuẩn, hãy chỉ bounding box khi cần.
-
-Với ảnh mới có kích thước khác, hệ thống dùng DeepLabv3 để ước lượng bounding box ban đầu, cắt vuông quanh tâm box với cạnh `1.10 × max(width,height)`, đệm xám `(128,128,128)` khi vượt biên, resize 384×384 rồi dự đoán mask cuối. Có thể chỉ box thủ công. Bước định vị tự động là phần triển khai bổ sung; quy tắc crop trong báo cáo được giữ nguyên.
-
-Mask kho được tạo lại bằng cùng checkpoint và cùng pipeline dùng cho query; lưu riêng trong `flower_cbir/data/deeplab_masks`. Không sửa ảnh hay mask nguồn trong `../postgres_data`. Mask 0/1 và 0/255 được hiểu nhất quán; giữ thành phần liên thông lớn nhất theo lân cận 8. Không tự chuyển sang GrabCut khi model lỗi hoặc trả mask rỗng.
-
-Các quy tắc F1–F4 đã nêu trong báo cáo được giữ nguyên: F2 chia đều bán kính; LBP tính trên toàn ảnh xám rồi chọn tâm trong M; mask nội bộ dùng elip 5×5, ngoài biên 0; Solidity dùng diện tích đa giác bao lồi; Fourier 128 tia, bước 0,25; IEP dùng Gaussian 5×5 sigma=1 và Canny 50/150 L2. Chi tiết nằm trong `flower_cbir/config/report_contract.json`.
-
-## CSV và nhập PostgreSQL riêng
-
-Xem `trich_rut_minh/README.md`. Các lệnh vẫn tách biệt `extract`, `check`, `load`, `all`; script chỉ là lớp công cụ quanh cùng bộ xử lý của ứng dụng. CSV dùng 17 chữ số có nghĩa cho giá trị float32 để vòng export/import giữ nguyên bit.
-
-PostgreSQL lấy cấu hình từ `database.local.json` hoặc `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`. Không ghi thông tin đăng nhập vào CSV, manifest hoặc mã nguồn.
-
-## Phiên bản và kiểm tra đồng bộ
-
-Mỗi batch ghi hash mã nguồn lõi, cấu hình cố định, checkpoint, thư viện xử lý và thông tin runtime PyTorch/CUDA. Đổi một phần ảnh hưởng biểu diễn phải tạo index mới. Loader từ chối vector cũ không có contract hoặc không khớp; cùng 163 chiều chưa đủ để coi là tương thích.
-
-`cbir_index_versions` quản lý phiên bản đang hoạt động; `cbir_index_entries` giữ snapshot từng vector và metadata. Các bảng hiện có `flower_images`, `flower_features`, `feature_normalization`, `normalized_features` được cập nhật trong **cùng một transaction** với việc chuyển phiên bản. Dữ liệu thô được đọc từ các cột thật, không khôi phục ngược từ vector Z-score. Lịch sử lưu phiên bản, trọng số và ngữ cảnh crop/phân đoạn.
-
-Trước lần ghi, hệ thống lưu snapshot PostgreSQL trong `output/backups/*-postgres.json.gz`. Lỗi trong transaction giữ nguyên phiên bản cũ. Nguồn ảnh/mask được kiểm tra SHA256 trước import và khi load. `output/verification/synchronization.json` ghi số ảnh khớp từng tiêu chí mask, vector thô, vector chuẩn hóa, CSV và API của Minh; khoảng cách với chính ảnh phải bằng 0.
-
-## DeepLabv3 và việc tinh chỉnh
-
-Model là DeepLabV3 ResNet50 hai lớp nền/hoa. Checkpoint được triển khai là bản inference-only trong `flower_cbir/models`, không chứa optimizer. Chuẩn hóa đầu vào ImageNet giống mã huấn luyện. Chỉ model phân đoạn được tinh chỉnh; các descriptor thủ công không đổi.
-
-`tools/finetune_deeplab.py` dùng 573 ảnh gallery để tinh chỉnh các head, chọn checkpoint theo Dice trên 200 ảnh validation và đánh giá 227 ảnh test sau khi chọn. Split và hash nguồn nằm trong `flower_cbir/models/segmentation_training/split.json`, kết quả trong `metrics.json`. Backbone được đóng băng. Nguồn pretrained trước đó và nhóm ảnh gần trùng chưa được xác minh hoàn toàn; không coi các kết quả này là chứng nhận trên mọi ảnh thu thập mới.
-
-```powershell
-# Nếu cần chuẩn bị lại split/mask tham chiếu trên máy khác hoặc cho một run mới
-.venv/Scripts/python.exe tools/prepare_segmentation_data.py --output output/new_segmentation_run/split.json
-
-# Chạy lại thí nghiệm phân đoạn với môi trường PyTorch có sẵn.
-# Dùng thư mục output mới, rồi chỉ triển khai checkpoint sau khi đánh giá.
-../deeplabv3/.venv/Scripts/python.exe tools/finetune_deeplab.py `
-  --manifest output/new_segmentation_run/split.json `
-  --source flower_cbir/models/deeplabv3_flower.pt `
-  --output output/new_segmentation_run --epochs 10 --patience 3
+pip install -r requirements.txt
 ```
 
-Khi chuyển máy, đặt `segmentation.python_executable` tới Python có PyTorch/torchvision phù hợp và `device` là `cuda` hoặc `cpu`, giữ checkpoint hoặc huấn luyện lại. Sau thay đổi runtime/model, chạy `--index` và `--verify-sync` trên máy đó. Khớp bit được kiểm tra trong cùng runtime đã ghi nhận; không hứa hẹn mọi GPU/thư viện khác nhau đều sinh đúng từng bit giống nhau.
+### 2. Cấu hình Cơ sở dữ liệu (PostgreSQL)
+Tạo tệp cấu hình từ mẫu có sẵn:
+```bash
+cp database.example.json database.local.json
+```
+Mở `database.local.json` và điền thông tin kết nối PostgreSQL của bạn:
+```json
+{
+  "host": "localhost",
+  "port": 5432,
+  "dbname": "flower_database",
+  "user": "postgres",
+  "password": "your_password",
+  "schema": "public",
+  "connect_timeout": 10
+}
+```
 
-## Chất lượng và phạm vi của “khớp 100%”
+### 3. Khởi chạy Giao diện Tìm kiếm (Web App)
+Khởi chạy ứng dụng Streamlit tìm kiếm ảnh hoa tương đồng:
+```bash
+python main.py --app
+```
+Giao diện sẽ tự động mở trên trình duyệt tại địa chỉ `http://localhost:8501`. Người dùng có thể:
+- Tải lên ảnh hoa bất kỳ để tự động tách nền và trích rút vector.
+- Điều chỉnh 4 thanh trượt trọng số $w_1, w_2, w_3, w_4$ theo nhu cầu tìm kiếm (Màu sắc, Bố cục vành, Kết cấu, Hình dạng).
+- Nhận về Top 5 bông hoa tương đồng nhất kèm khoảng cách chi tiết và lịch sử truy vấn.
 
-“Khớp 100%” ở đây là cùng thuật toán, cùng quy ước, và kiểm tra bằng `np.array_equal` trên dữ liệu export/query/DB trong môi trường ghi nhận. Điều đó không có nghĩa phân đoạn hay tìm kiếm chính xác 100%. Dice và P@5 là các phép đo chất lượng riêng. Trọng số được chọn trên validation; test không được dùng để chọn trọng số. Nhãn loài từ tên ảnh còn mang tính tạm thời, nên cần kiểm tra thêm relevance thị giác của kết quả.
+### 4. Chạy Phân đoạn Ảnh Mới với DeepLabV3+ (Câu 3)
+Phân đoạn tự động cho một ảnh hoa mới với model chuẩn và hậu xử lý:
+```bash
+python cau_3/predict_new_flowers.py path/to/flower.jpg
+```
+
+### 5. Chạy Trích rút Đặc trưng 163 Chiều
+Trích xuất đặc trưng cho tập dữ liệu:
+```bash
+python trich_rut_minh/full_163.py --help
+```
+
+---
+
+## 🔬 Thông số Kỹ thuật & Độ chính xác
+
+* **Kiến trúc phân đoạn**: DeepLabV3+ (Backbone ResNet thu nhỏ, `width=32`, `rates=(2, 4, 6)`), input/output $384 \times 384$.
+* **Độ chính xác phân đoạn**:
+  - **Validation mIoU**: $98.50\%$ (Dice: $99.24\%$)
+  - **Held-out Test mIoU**: $98.18\%$ (Dice: $99.07\%$)
+  - Kiểm thử thành công hoàn hảo trên $14/14$ ảnh hoa mới ngoài tập dữ liệu.
+* **Độ đo tương đồng**:
+  $$D = w_1 D_1 + w_2 D_2 + w_3 D_3 + w_4 D_4, \quad S = 1 - D \in [0, 1]$$
+  - $D_1, D_3$: Khoảng cách Hellinger trên biểu đồ xác suất.
+  - $D_2, D_4$: Khoảng cách RMS biến đổi trên vector số thực Z-score.

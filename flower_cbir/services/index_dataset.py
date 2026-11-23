@@ -59,7 +59,7 @@ def _load_version(directory, output_dir, expected_fingerprint=None):
 
 def build_or_load_index(output_dir=None, force_recompute=False, image_dir=None,
                         mask_dir=None, expected_count=None):
-    """Default masks are DeepLabV3 predictions; supplied masks must match exactly.
+    """Use the selected DeepLabV3+ and postprocessing for gallery and queries.
 
     Existing RGB 384x384 images retain their published framing. Source images
     are never modified. All tools call extract_image for the feature vector.
@@ -78,25 +78,33 @@ def build_or_load_index(output_dir=None, force_recompute=False, image_dir=None,
     segmenter = get_segmenter()
     model_info = segmenter.info
     segmentation_key = fingerprint({'model': model_info,
-        'worker': contract['source_sha256']['deeplab_worker.py'],
+        'worker': contract['segmentation'].get('worker_sha256',
+            contract['source_sha256']['deeplab_worker.py']),
         'clean_mask': contract['source_sha256']['segmentation.py']})[:20]
     mask_root = PROJECT_ROOT/config['dataset']['mask_dir']/segmentation_key
+    reviewed = config['dataset'].get('mask_source') == 'reviewed_final_segmentation_v2'
+    reviewed_dir = Path(config['dataset']['reviewed_mask_dir']).resolve() if reviewed else None
     labels_path = (PROJECT_ROOT/config['dataset']['labels_mat']).resolve()
     labels = loadmat(labels_path)['labels'].ravel() if labels_path.is_file() else []
     metadata, timings = [], []
     for position, image_path in enumerate(images, 1):
         with Image.open(image_path) as original_image:
-            if original_image.mode!='RGB' or original_image.size!=(384,384) or image_path.suffix.lower()!='.png':
-                raise ValueError(f'{image_path.name}: prepare catalog data as RGB PNG 384x384 per the report; query inputs can use other formats.')
+            if original_image.size!=(384,384) or image_path.suffix.lower()!='.png':
+                raise ValueError(f'{image_path.name}: catalog inputs must be PNG 384x384.')
         rgb = load_image(image_path)
         if rgb.shape != (384, 384, 3):
             raise ValueError(f'{image_path.name}: batch images must already be RGB 384x384 as in the report.')
         image_hash = file_sha256(image_path)
         pixel_hash = hashlib.sha256(rgb.tobytes()).hexdigest()
-        cached_mask = mask_root/pixel_hash[:20]/(image_path.stem+'.png')
+        cached_mask = (reviewed_dir/(image_path.stem+'.png') if reviewed else
+                       mask_root/pixel_hash[:20]/(image_path.stem+'.png'))
         cached_note = cached_mask.with_suffix('.json')
         mask = None
-        if cached_mask.is_file() and cached_note.is_file():
+        if reviewed:
+            if not cached_mask.is_file():
+                raise FileNotFoundError(f'Missing reviewed v2 mask: {cached_mask}')
+            mask = clean_mask(np.asarray(Image.open(cached_mask).convert('L')))
+        elif cached_mask.is_file() and cached_note.is_file():
             note = json.loads(cached_note.read_text(encoding='utf-8'))
             if note.get('pixel_sha256') == pixel_hash and note.get('mask_sha256') == file_sha256(cached_mask):
                 mask = clean_mask(np.asarray(Image.open(cached_mask).convert('L')))
@@ -122,12 +130,12 @@ def build_or_load_index(output_dir=None, force_recompute=False, image_dir=None,
         metadata.append({'image_id': source_id, 'source_id': source_id, 'filename': image_path.name,
             'image_path': str(image_path), 'mask_path': str(cached_mask),
             'image_sha256': image_hash, 'mask_sha256': file_sha256(cached_mask),
-            'pixel_sha256': pixel_hash, 'mask_provenance': 'deeplabv3',
+            'pixel_sha256': pixel_hash, 'mask_provenance': config['dataset']['mask_source'],
             'segmentation_key': segmentation_key,
             'label': int(labels[source_id-1]) if 1 <= source_id <= len(labels) else None,
             'label_provenance': config['dataset']['label_provenance']})
         if position % 100 == 0 or position == len(images):
-            print(f'DeepLabV3 masks verified: {position}/{len(images)}', flush=True)
+            print(f'DeepLabV3+ postprocessed masks verified: {position}/{len(images)}', flush=True)
     signature = {'records': metadata, 'contract': contract, 'model_runtime': model_info,
                  'labels_sha256': file_sha256(labels_path) if labels_path.is_file() else None}
     identity = fingerprint(signature)

@@ -1,22 +1,23 @@
 {
-  "pipeline_version": "3.0.0",
+  "pipeline_version": "3.2.0-unified-deeplabv3plus-v2",
   "name": "flower_cbir_163d",
-  "description": "Report 1 feature formulas, shared DeepLabV3 segmentation and versioned PostgreSQL index",
+  "description": "Unified DeepLabV3+ v2 and mask postprocessing for gallery and query, followed by report 1 features and normalization",
   "image_size": [
     384,
     384
   ],
   "dataset": {
-    "image_dir": "../postgres_data/image_384",
+    "image_dir": "D:\\CSDLDPT\\image_384",
     "mask_dir": "flower_cbir/data/deeplab_masks",
+    "reviewed_mask_dir": "D:\\CSDLDPT\\final_segmentation_v2",
     "expected_count": 1000,
     "labels_mat": "../imagelabels.mat",
     "label_provenance": "provisional_filename_mapping",
-    "reference_mask_dir": "../postgres_data/final_segmentation_1",
-    "mask_source": "deeplabv3"
+    "reference_mask_dir": "D:\\CSDLDPT\\final_segmentation_v2",
+    "mask_source": "deeplabv3plus_v2_postprocessed"
   },
   "segmentation": {
-    "method": "deeplabv3",
+    "method": "deeplabv3plus_v2",
     "initial_rect": [
       8,
       8,
@@ -25,9 +26,21 @@
     ],
     "iter_count": 5,
     "seed": 42,
-    "checkpoint": "flower_cbir/models/deeplabv3_flower_v3.pt",
-    "python_executable": "../deeplabv3/.venv/Scripts/python.exe",
-    "device": "cuda"
+    "checkpoint": "D:\\CSDLDPT\\cau_3\\deeplabv3plus_384_v2_finetuned\\best_deeplabv3plus.pt",
+    "active_model_config": "D:\\CSDLDPT\\cau_3\\active_deeplab_model.json",
+    "postprocessing_path": "D:\\CSDLDPT\\cau_3\\mask_postprocessing.py",
+    "worker": "D:\\CSDLDPT\\cau_3\\cbir_deeplabv3plus_worker.py",
+    "python_executable": "C:\\Users\\Admin\\AppData\\Local\\Programs\\Python\\Python313\\python.exe",
+    "device": "cpu",
+    "postprocessing": {
+      "threshold": 0.45,
+      "opening": false,
+      "closing": false,
+      "fill_holes": true,
+      "max_hole_area": 20,
+      "keep_nearby": true,
+      "repair_center": true
+    }
   },
   "geometry": {
     "b5_kernel_shape": "ellipse",

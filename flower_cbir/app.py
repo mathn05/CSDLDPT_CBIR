@@ -274,7 +274,7 @@ with tab_search:
             preset_mask = cv2.imread(match_meta["mask_path"], cv2.IMREAD_GRAYSCALE)
 
     with col_config:
-        st.markdown("##### 🌸 Phân đoạn DeepLabv3")
+        st.markdown("##### 🌸 Phân đoạn DeepLabV3+ 384 v2")
         st.caption('Ảnh đã chuẩn 384×384 được giữ nguyên. Ảnh kích thước khác được định vị hoa, cắt vuông và thêm lề 10%.')
         enable_custom_box = st.checkbox("Điều chỉnh khung bao bông hoa", value=False)
         if enable_custom_box:
@@ -290,9 +290,9 @@ with tab_search:
             flower_box=None
 
         use_stored_mask = st.checkbox(
-            "Dùng lại mask DeepLabv3 đã lưu cho ảnh trong kho",
+            "Dùng mask DeepLabV3+ đã lưu cho ảnh trong kho",
             value=(preset_mask is not None and not enable_custom_box),disabled=enable_custom_box,
-            help="Chỉ dùng khi khớp nội dung ảnh và giữ nguyên khung ảnh. Bỏ chọn để chạy lại cùng mô hình DeepLabv3."
+            help="Mask đã lưu được tạo bằng DeepLabV3+ 384 v2 và cùng hậu xử lý. Bỏ chọn để chạy lại mô hình trên ảnh này."
         )
 
     st.divider()
@@ -320,7 +320,8 @@ with tab_search:
                         weights=weights,
                         top_k=top_k,
                         leave_one_out=leave_one_out,
-                        query_filename=query_filename
+                        query_filename=query_filename,
+                        use_gallery_mask=bool(use_stored_mask and not enable_custom_box)
                     )
                     st.session_state["last_query_result"] = search_res
                     st.session_state["query_filename"] = query_filename or "uploaded_image.png"

@@ -45,7 +45,8 @@ def verify_synchronization():
         if index<result['verified_through']:
             continue
         try:
-            query=engine.search(item['image_path'],top_k=min(5,engine.num_images))
+            query=engine.search(item['image_path'],top_k=min(5,engine.num_images),
+                                use_gallery_mask=False)
             info=query['query_info']
             saved_mask=np.asarray(Image.open(item['mask_path']).convert('L'))
             exporter=np.concatenate(extract_one(info['image_rgb'],info['mask_binary'])).astype(np.float32)
@@ -69,7 +70,7 @@ def verify_synchronization():
         if (index+1)%100==0 or index+1==engine.num_images:
             result['verified_through']=index+1
             atomic_json(progress,result)
-            print(f'Fresh DeepLabV3/query/CSV/PostgreSQL parity: {index+1}/{engine.num_images}; failures={len(result["failures"])}',flush=True)
+            print(f'Fresh DeepLabV3+ postprocessing/query/CSV/PostgreSQL parity: {index+1}/{engine.num_images}; failures={len(result["failures"])}',flush=True)
     result['seconds']=time.perf_counter()-started
     result['passed']=not result['failures'] and result['max_self_distance']==0 and all(
         result[key]==engine.num_images for key in ['raw_exact','normalized_exact','mask_exact','csv_exact','exporter_exact'])
