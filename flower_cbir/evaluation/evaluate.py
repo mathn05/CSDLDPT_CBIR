@@ -111,7 +111,7 @@ def run_ablation_study(engine: FlowerSearchEngine, query_idx: int = 0):
     results = {}
     for name, w in configs.items():
         res, t_ms = engine.search_by_vector(
-            query_vec, weights=w, top_k=5, exclude_filename=query_filename
+            query_vec, weights=w, exclude_filename=query_filename
         )
         results[name] = {
             "weights": list(w),

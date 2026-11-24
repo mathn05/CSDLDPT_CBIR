@@ -11,7 +11,7 @@ from flower_cbir.core.schema import GROUP_SLICES
 from flower_cbir.services.csv_tools import read_csv_batch
 from flower_cbir.services.database import FlowerDatabase
 from flower_cbir.services.index_dataset import atomic_json
-from flower_cbir.services.search import FlowerSearchEngine
+from flower_cbir.services.search import FlowerSearchEngine, gallery_image, gallery_mask
 from flower_cbir.settings import PROJECT_ROOT
 
 
@@ -45,9 +45,9 @@ def verify_synchronization():
         if index<result['verified_through']:
             continue
         try:
-            query=engine.search(item['image_path'],top_k=min(5,engine.num_images))
+            query=engine.search(gallery_image(item))
             info=query['query_info']
-            saved_mask=np.asarray(Image.open(item['mask_path']).convert('L'))
+            saved_mask=gallery_mask(item)
             exporter=np.concatenate(extract_one(info['image_rgb'],info['mask_binary'])).astype(np.float32)
             checks={
                 'raw_exact':np.array_equal(info['raw_vector'],data['raw_features'][index]),
@@ -69,7 +69,7 @@ def verify_synchronization():
         if (index+1)%100==0 or index+1==engine.num_images:
             result['verified_through']=index+1
             atomic_json(progress,result)
-            print(f'Fresh DeepLabV3/query/CSV/PostgreSQL parity: {index+1}/{engine.num_images}; failures={len(result["failures"])}',flush=True)
+            print(f'Fresh DeepLabV3+ postprocessing/query/CSV/PostgreSQL parity: {index+1}/{engine.num_images}; failures={len(result["failures"])}',flush=True)
     result['seconds']=time.perf_counter()-started
     result['passed']=not result['failures'] and result['max_self_distance']==0 and all(
         result[key]==engine.num_images for key in ['raw_exact','normalized_exact','mask_exact','csv_exact','exporter_exact'])

@@ -7,15 +7,24 @@ database.local.json
 
 # Local environments, IDE state and Python caches
 .venv/
+venv/
+ENV/
+env/
 .idea/
 .vscode/
 __pycache__/
 *.py[cod]
+*$py.class
+*.so
+build/
+dist/
+*.egg-info/
+.eggs/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 
-# Local-only tests and diagnostics (kept on this machine)
+# Local-only tests and diagnostics
 /tests/
 /test_*.py
 /check_*.py
@@ -26,19 +35,20 @@ __pycache__/
 coverage.xml
 htmlcov/
 
-# Generated reports, temporary documents, logs and recovery snapshots
+# Generated reports, local report drafts, temporary documents and logs
 /output/
 /tmp/
 /reports/
 /notes/
+/BAO_CAO_*.md
 *.local.md
 *.log
 *.tmp
 *.bak
+.DS_Store
+Thumbs.db
 
-# Runtime artifacts and large weights are supplied/generated separately
-/flower_cbir/data/
-/flower_cbir/models/*
-!/flower_cbir/models/README.md
-/trich_rut_minh/*.csv
-/trich_rut_minh/extraction_manifest*.json
+# Runtime artifacts and large weights supplied/generated locally
+/flower_cbir/models/*.pt
+/flower_cbir/models/segmentation_training/
+/flower_cbir/data/training_reference/
