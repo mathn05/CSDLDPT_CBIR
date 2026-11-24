@@ -10,7 +10,7 @@ from psycopg import sql
 from psycopg.types.json import Jsonb
 
 from flower_cbir.core.normalization import SelectiveNormalizer
-from flower_cbir.core.contract import verify_contract, file_sha256
+from flower_cbir.core.contract import verify_contract
 from flower_cbir.core.schema import validate_features, vector_from_columns
 from flower_cbir.settings import PROJECT_ROOT, load_config
 
@@ -54,15 +54,6 @@ def connect_database(config=None):
     return connection, schema
 
 
-def resolve_dataset_path(stored_path, filename, directory_key):
-    path = (PROJECT_ROOT / Path(stored_path)).resolve()
-    if path.is_file():
-        return str(path)
-    directory = PROJECT_ROOT / load_config()['dataset'][directory_key]
-    candidate = (directory / Path(filename).name).resolve()
-    return str(candidate) if candidate.is_file() else str(path)
-
-
 class FlowerDatabase:
     """Read a verified active snapshot; publish all gallery tables atomically."""
 
@@ -93,14 +84,18 @@ class FlowerDatabase:
                 FROM cbir_index_versions WHERE active
             ''').fetchone()
             saved_stats = self.conn.execute('''
-                SELECT feature_means,feature_stds FROM feature_normalization WHERE normalization_id=%s
+                SELECT f1_means || f2_means || f3_means || f4_means,
+                       f1_stds || f2_stds || f3_stds || f4_stds
+                FROM feature_normalization WHERE normalization_id=%s
             ''',(normalization_id,)).fetchone()
             rows = self.conn.execute('''
-                SELECT i.image_id,i.filename,i.image_path,i.mask_path,
+                SELECT i.image_id,i.filename,i.image_data,m.mask_data,
                        f.hs_histogram,f.v_histogram,f.lab_mean,f.lab_std,f.lbp_histogram,
                        f.circularity,f.solidity,f.aspect_ratio,f.rotated_extent,f.radial_spectrum,f.iap,f.iep,
-                       n.normalized_vector,e.raw_vector,e.normalized_vector,e.metadata
+                       n.f1_vector || n.f2_vector || n.f3_vector || n.f4_vector,
+                       e.raw_vector,e.normalized_vector,e.metadata
                 FROM cbir_index_entries e JOIN flower_images i ON i.image_id=e.image_id
+                LEFT JOIN flower_masks m ON m.image_id=i.image_id
                 LEFT JOIN flower_features f ON f.image_id=i.image_id
                 LEFT JOIN normalized_features n ON n.image_id=i.image_id AND n.normalization_id=%s
                 WHERE e.version_id=%s ORDER BY i.filename
@@ -132,15 +127,15 @@ class FlowerDatabase:
             raise ValueError('Normalizer does not reproduce PostgreSQL vectors exactly.')
         metadata = []
         for row in rows:
-            identity,filename,image_path,mask_path = row[:4]
-            if row[19]['filename']!=filename:
+            identity, filename, image_data, mask_data = row[:4]
+            if row[19]['filename'] != filename:
                 raise ValueError('Image metadata differs from the immutable extraction version.')
-            record = {**row[19],'image_id':identity,'filename':filename,
-                'image_path':resolve_dataset_path(image_path,filename,'image_dir'),
-                'mask_path':resolve_dataset_path(mask_path,Path(filename).stem+'.png','mask_dir')}
-            for kind in ['image','mask']:
-                if file_sha256(record[kind+'_path']) != record[kind+'_sha256']:
-                    raise ValueError(f'{filename}: source {kind} changed after index publication.')
+            record = {**row[19], 'image_id': identity, 'filename': filename,
+                      'image_data': bytes(image_data), 'mask_data': bytes(mask_data)}
+            for kind in ['image', 'mask']:
+                payload = record[kind + '_data']
+                if not payload or hashlib.sha256(payload).hexdigest() != record[kind + '_sha256']:
+                    raise ValueError(f'{filename}: PostgreSQL {kind} bytes differ from the published index.')
             metadata.append(record)
         return {'metadata':metadata,'raw_features':raw,'normalized_features':normalized,
                 'normalizer':normalizer,'version_id':version_id,'contract':contract,
@@ -150,25 +145,38 @@ class FlowerDatabase:
         from flower_cbir.services.index_store import publish_index
         return publish_index(self,data,replace_all=replace_all,backup_artifact=backup_artifact)
 
-    def log_retrieval(self, query_filename, query_norm_vec, top5_results, weights, execution_ms, version_id=None, query_context=None):
+    def log_retrieval(self, query_filename, query_norm_vec, top5_results, weights, execution_ms,
+                      version_id=None, query_context=None, query_image_data=None):
         vector = query_norm_vec.tolist() if query_norm_vec is not None else []
         with self.lock, self.conn.transaction():
             self.conn.execute('''INSERT INTO retrieval_history
-                (query_image_path, query_features, top5_results, execution_ms, created_at,index_version,weights,query_context)
-                VALUES (%s,%s,%s,%s,CURRENT_TIMESTAMP,%s,%s,%s)''',
-                (query_filename, vector, Jsonb(top5_results[:5]), execution_ms,version_id,list(weights),Jsonb(query_context or {})))
+                (query_image_path, query_features, top5_results, execution_ms, created_at,
+                 index_version, weights, query_context, query_image_data)
+                VALUES (%s,%s,%s,%s,CURRENT_TIMESTAMP,%s,%s,%s,%s)''',
+                (query_filename, vector, Jsonb(top5_results[:5]), execution_ms, version_id,
+                 list(weights), Jsonb(query_context or {}), query_image_data))
 
     def get_history(self, limit=10):
         with self.lock:
             rows = self.conn.execute('''
                 SELECT query_id,query_image_path,top5_results,execution_ms,
-                       EXTRACT(EPOCH FROM created_at),index_version,weights,query_context
+                       EXTRACT(EPOCH FROM created_at),index_version,weights,query_context,query_image_data
                 FROM retrieval_history ORDER BY query_id DESC LIMIT %s
             ''', (limit,)).fetchall()
+            image_ids = {int(item['image_id']) for row in rows for item in (row[2] or [])
+                         if item.get('image_id') is not None}
+            media = {}
+            if image_ids:
+                media = {identity: bytes(payload) for identity, payload in self.conn.execute(
+                    'SELECT image_id,image_data FROM flower_images WHERE image_id=ANY(%s)',
+                    (list(image_ids),)).fetchall() if payload is not None}
         return [{
-            'query_id': row[0], 'query_filename': row[1], 'top5': row[2] or [],
+            'query_id': row[0], 'query_filename': row[1],
+            'top5': [{**item, 'image_data': media.get(int(item['image_id']))}
+                     if item.get('image_id') is not None else item for item in (row[2] or [])],
             'weights': row[6], 'execution_ms': row[3], 'timestamp': float(row[4]), 'version_id': row[5],
-            'query_context':row[7],
+            'query_context': row[7],
+            'query_image_data': bytes(row[8]) if row[8] is not None else None,
         } for row in rows]
 
     def close(self):
