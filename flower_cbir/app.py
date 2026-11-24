@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 from PIL import Image
 
 from flower_cbir.core.preprocess import load_image
-from flower_cbir.services.search import FlowerSearchEngine
+from flower_cbir.services.search import FlowerSearchEngine, gallery_image, gallery_mask
 from flower_cbir.services.database import FlowerDatabase
 from flower_cbir.evaluation.evaluate import run_correctness_checks, run_ablation_study
 from flower_cbir.settings import default_weights
@@ -263,15 +263,15 @@ with tab_search:
                 if matched:
                     source_rgb = load_image(query_source)
                     if source_rgb.shape[:2] == (384, 384):
-                        preset_mask = cv2.imread(matched['mask_path'], cv2.IMREAD_GRAYSCALE)
+                        preset_mask = gallery_mask(matched)
                     st.success(f"Nội dung ảnh khớp ID #{matched['image_id']} trong kho.")
         else:
             sample_choices = [m["filename"] for m in engine.metadata]
             chosen_file = st.selectbox("Chọn ảnh trong kho (1.000 ảnh):", sample_choices, index=0)
             match_meta = next(m for m in engine.metadata if m["filename"] == chosen_file)
-            query_source = match_meta["image_path"]
+            query_source = gallery_image(match_meta)
             query_filename = match_meta["filename"]
-            preset_mask = cv2.imread(match_meta["mask_path"], cv2.IMREAD_GRAYSCALE)
+            preset_mask = gallery_mask(match_meta)
 
     with col_config:
         st.markdown("##### 🌸 Phân đoạn DeepLabV3+ 384 v2")
@@ -336,6 +336,7 @@ with tab_search:
                         weights=weights,
                         execution_ms=search_res["timings"]["total_backend_ms"],
                         version_id=engine.version_id,
+                        query_image_data=query_source,
                         query_context={'stored_mask':mask_to_use is not None,'flower_box':flower_box,'top_k':top_k,
                                        'preparation':search_res['query_info']['preparation'],
                                        'segmentation':search_res['query_info']['segmentation'],'leave_one_out':leave_one_out}
@@ -373,10 +374,7 @@ with tab_search:
                 with cols_top[i]:
                     badge_class = f"badge-rank-{item['rank']}" if item['rank'] <= 3 else "badge-rank-other"
                     st.markdown(f'<span class="metric-badge {badge_class}">RANK #{item["rank"]}</span>', unsafe_allow_html=True)
-                    if os.path.exists(item["image_path"]):
-                        st.image(item["image_path"], width='stretch')
-                    else:
-                        st.warning(f"File {item['filename']} không khả dụng")
+                    st.image(gallery_image(engine.metadata_by_id[item["image_id"]]), width='stretch')
 
                     st.markdown(f"**{item['filename']}**")
                     st.markdown(f"Độ tương đồng: **{item['similarity']*100:.1f}%**")
@@ -547,5 +545,24 @@ with tab_history:
                 "Thời điểm": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r["timestamp"]))
             })
         st.dataframe(h_table, width='stretch')
+        selected_history = st.selectbox(
+            "Xem ảnh của lần truy vấn",
+            history_records,
+            format_func=lambda record: f"#{record['query_id']} - {record['query_filename']}"
+        )
+        columns = st.columns(1 + len(selected_history['top5']))
+        with columns[0]:
+            st.caption("Ảnh truy vấn")
+            if selected_history['query_image_data']:
+                st.image(selected_history['query_image_data'], width='stretch')
+            else:
+                st.caption("Lần truy vấn cũ chưa lưu nội dung ảnh.")
+        for column, result in zip(columns[1:], selected_history['top5']):
+            with column:
+                st.caption(f"#{result['rank']} - {result['filename']}")
+                if result.get('image_data'):
+                    st.image(result['image_data'], width='stretch')
+                else:
+                    st.caption("Ảnh kết quả đã được gỡ khỏi kho.")
     else:
         st.info("Chưa có lịch sử truy vấn nào được lưu.")

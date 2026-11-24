@@ -1,5 +1,7 @@
 import time
 import hashlib
+from io import BytesIO
+from PIL import Image
 import numpy as np
 from pathlib import Path
 
@@ -9,6 +11,18 @@ from flower_cbir.settings import default_weights, validate_weights, load_config
 from flower_cbir.core.pipeline import extract_image
 from flower_cbir.core.contract import verify_contract, file_sha256
 from flower_cbir.core.segmentation import clean_mask
+
+
+def gallery_image(record):
+    """Use PostgreSQL image bytes, or a file for a disk-built offline index."""
+    return record.get('image_data') or record['image_path']
+
+
+def gallery_mask(record):
+    """Decode a binary mask in the same coordinates as the prepared RGB image."""
+    source = BytesIO(record['mask_data']) if record.get('mask_data') else record['mask_path']
+    with Image.open(source) as image:
+        return clean_mask(np.asarray(image.convert('L')))
 
 
 class FlowerSearchEngine:
@@ -40,6 +54,7 @@ class FlowerSearchEngine:
         if not np.isfinite(self.raw_matrix).all() or not np.isfinite(self.normalized_matrix).all():
             raise ValueError('Index contains nonfinite values.')
         self.image_ids = np.array([item['image_id'] for item in self.metadata])
+        self.metadata_by_id = {item['image_id']: item for item in self.metadata}
         self.pixel_lookup = {item['pixel_sha256']: item for item in self.metadata if 'pixel_sha256' in item}
 
     def match_source(self, source):
@@ -86,8 +101,8 @@ class FlowerSearchEngine:
                 "rank": rank,
                 "image_id": meta["image_id"],
                 "filename": meta["filename"],
-                "image_path": meta["image_path"],
-                "mask_path": meta["mask_path"],
+                "image_path": meta.get("image_path"),
+                "mask_path": meta.get("mask_path"),
                 "distance": float(D_all[idx]),
                 "similarity": float(S_all[idx]),
                 "D1": d1_val,
@@ -153,9 +168,7 @@ class FlowerSearchEngine:
             if flower_box is None and crop_box is None:
                 gallery_item = self.match_source(query_source)
                 if gallery_item is not None and query_mask is None and use_gallery_mask:
-                    from PIL import Image
-                    with Image.open(gallery_item['mask_path']) as saved:
-                        query_mask = np.asarray(saved.convert('L'))
+                    query_mask = gallery_mask(gallery_item)
         weights = default_weights() if weights is None else validate_weights(weights)
         total_start = time.perf_counter()
         query_info = extract_image(query_source,supplied_mask=query_mask,flower_box=flower_box,crop_box=crop_box)
@@ -165,11 +178,11 @@ class FlowerSearchEngine:
         if self.contract is not None and query_mask is not None:
             if matched is None:
                 raise ValueError('A supplied mask is allowed only for a matching gallery image.')
-            from PIL import Image
-            if file_sha256(matched['mask_path']) != matched['mask_sha256']:
+            mask_hash = (hashlib.sha256(matched['mask_data']).hexdigest()
+                         if matched.get('mask_data') else file_sha256(matched['mask_path']))
+            if mask_hash != matched['mask_sha256']:
                 raise ValueError('The stored gallery mask changed after index publication.')
-            with Image.open(matched['mask_path']) as saved:
-                expected_mask = clean_mask(np.asarray(saved.convert('L')))
+            expected_mask = gallery_mask(matched)
             if not np.array_equal(query_info['mask_binary'],expected_mask):
                 raise ValueError('The supplied query mask differs from the stored model mask.')
             query_info['segmentation']={'method':'cached_deeplabv3plus_v2_mask'}

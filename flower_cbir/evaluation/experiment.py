@@ -10,7 +10,7 @@ import numpy as np
 from flower_cbir.core.distance import compute_group_distances
 from flower_cbir.core.normalization import SelectiveNormalizer
 from flower_cbir.services.index_dataset import build_or_load_index
-from flower_cbir.services.search import FlowerSearchEngine
+from flower_cbir.services.search import FlowerSearchEngine, gallery_image
 from flower_cbir.settings import CONFIG_PATH, PROJECT_ROOT
 
 
@@ -85,7 +85,7 @@ def run_experiment():
     automatic = []
     for index in test[:20]:
         item = metadata[index]
-        result = engine.search(item['image_path'], weights=chosen)
+        result = engine.search(gallery_image(item), weights=chosen)
         relevant = [next(record for record in engine.metadata if record['image_id'] == hit['image_id'])['label'] == item['label'] for hit in result['results']]
         automatic.append({'query_id': item['image_id'], 'filename': item['filename'], 'P_at_5': float(np.mean(relevant)), 'timings': result['timings'], 'top5': result['results']})
     examples = []
