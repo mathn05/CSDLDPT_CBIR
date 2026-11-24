@@ -7,11 +7,19 @@ database.local.json
 
 # Local environments, IDE state and Python caches
 .venv/
+venv/
+ENV/
+env/
 .idea/
 .vscode/
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+build/
+dist/
+*.egg-info/
+.eggs/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -27,11 +35,12 @@ __pycache__/
 coverage.xml
 htmlcov/
 
-# Generated reports, temporary documents, logs and recovery snapshots
+# Generated reports, local report drafts, temporary documents and logs
 /output/
 /tmp/
 /reports/
 /notes/
+/BAO_CAO_*.md
 *.local.md
 *.log
 *.tmp
@@ -43,5 +52,3 @@ Thumbs.db
 /flower_cbir/models/*.pt
 /flower_cbir/models/segmentation_training/
 /flower_cbir/data/training_reference/
-
-
