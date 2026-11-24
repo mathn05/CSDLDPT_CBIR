@@ -16,10 +16,10 @@ import cv2
 import matplotlib.pyplot as plt
 
 from flower_cbir.core.preprocess import load_image
-from flower_cbir.core.segmentation import clean_mask, create_mask_overlay
+from flower_cbir.core.segmentation import create_mask_overlay
 from flower_cbir.core.features import extract_all_features
 from flower_cbir.core.distance import compute_overall_distance
-from flower_cbir.services.search import FlowerSearchEngine
+from flower_cbir.services.search import FlowerSearchEngine, gallery_image, gallery_mask
 from flower_cbir.services.database import FlowerDatabase
 from flower_cbir.evaluation.evaluate import run_correctness_checks, run_ablation_study
 from flower_cbir.settings import default_weights
@@ -300,14 +300,20 @@ def get_search_engine(active_version_id, contract_fingerprint):
     return engine, db
 
 
+def _has_media(source) -> bool:
+    if isinstance(source, (bytes, bytearray)):
+        return len(source) > 0
+    if isinstance(source, (str, Path)):
+        return os.path.exists(source)
+    return source is not None
+
+
 @st.cache_data(show_spinner=False, max_entries=32)
-def load_gallery_visual_explanation(image_path: str, mask_path: str):
+def load_gallery_visual_explanation(version_id: str, image_id: int):
     """Load RGB, cleaned mask, overlay and intermediate explanation signals for a gallery item."""
-    rgb = load_image(image_path)
-    raw_mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-    if raw_mask is None:
-        raise FileNotFoundError(f"Không tìm thấy mask: {mask_path}")
-    mask = clean_mask(raw_mask)
+    meta = engine.metadata_by_id[image_id]
+    rgb = load_image(gallery_image(meta))
+    mask = gallery_mask(meta)
     overlay = create_mask_overlay(rgb, mask)
     _, explanation = extract_all_features(rgb, mask)
     return {
@@ -737,6 +743,7 @@ with tab_search:
                     weights=weights,
                     execution_ms=search_res["timings"]["total_backend_ms"],
                     version_id=engine.version_id,
+                    query_image_data=query_source,
                     query_context={
                         'preparation': search_res['query_info']['preparation'],
                         'segmentation': search_res['query_info']['segmentation'],
@@ -789,6 +796,8 @@ with tab_search:
                 with st.container(border=True):
                     badge_class = f"badge-rank-{item['rank']}" if item['rank'] <= 3 else "badge-rank-other"
                     safe_fname = html.escape(item["filename"])
+                    meta_item = engine.metadata_by_id[item["image_id"]]
+                    img_src = gallery_image(meta_item)
                     st.markdown(
                         f'<div class="rank-header">'
                         f'<span class="metric-badge {badge_class}">RANK #{item["rank"]}</span>'
@@ -796,8 +805,8 @@ with tab_search:
                         f'</div>',
                         unsafe_allow_html=True,
                     )
-                    if os.path.exists(item["image_path"]):
-                        st.image(item["image_path"], width='stretch')
+                    if _has_media(img_src):
+                        st.image(img_src, width='stretch')
                     else:
                         st.warning(f"File {item['filename']} không khả dụng")
 
@@ -813,10 +822,11 @@ with tab_search:
                     )
 
                     with st.expander("🔎 Mặt nạ & Đóng góp wᵢ·Dᵢ"):
-                        if os.path.exists(item["mask_path"]):
+                        has_msk = meta_item.get("mask_data") is not None or _has_media(meta_item.get("mask_path"))
+                        if _has_media(img_src) and has_msk:
                             m_col1, m_col2 = st.columns(2)
-                            m_col1.image(item["image_path"], caption="Ảnh kho", width='stretch')
-                            m_col2.image(item["mask_path"], caption="Mask kho", width='stretch')
+                            m_col1.image(img_src, caption="Ảnh kho", width='stretch')
+                            m_col2.image(gallery_mask(meta_item), caption="Mask kho", width='stretch')
                         st.markdown(render_contribution_bars_html(item), unsafe_allow_html=True)
                         st.caption(
                             f"**Chi tiết F4:** Scalars `{item['f4_details']['scalars']:.3f}` · "
@@ -860,9 +870,15 @@ with tab_explain:
         selected_rank_idx = match_options.index(selected_label)
         selected_item = results[selected_rank_idx]
         gallery_idx = filename_to_idx.get(selected_item["filename"])
+        selected_meta = engine.metadata_by_id.get(selected_item["image_id"])
 
-        if gallery_idx is not None and os.path.exists(selected_item["image_path"]) and os.path.exists(selected_item["mask_path"]):
-            target_vis = load_gallery_visual_explanation(selected_item["image_path"], selected_item["mask_path"])
+        if (
+            gallery_idx is not None
+            and selected_meta is not None
+            and _has_media(gallery_image(selected_meta))
+            and (selected_meta.get("mask_data") is not None or _has_media(selected_meta.get("mask_path")))
+        ):
+            target_vis = load_gallery_visual_explanation(engine.version_id, selected_item["image_id"])
             target_exp = target_vis["explanation"]
             target_geom = target_exp["geometry"]
             target_raw = engine.raw_matrix[gallery_idx]
@@ -1070,9 +1086,10 @@ with tab_eval:
             st.markdown("##### 2. Thử nghiệm Đóng góp Nhóm Đặc trưng (Ablation Study)")
             ablate_idx = st.number_input("Chọn chỉ số ảnh mẫu trong kho (0..999):", 0, engine.num_images - 1, 0)
             sample_meta = engine.metadata[ablate_idx]
-            if os.path.exists(sample_meta["image_path"]):
+            sample_src = gallery_image(sample_meta)
+            if _has_media(sample_src):
                 ab_c1, ab_c2 = st.columns([1, 3])
-                ab_c1.image(sample_meta["image_path"], caption=sample_meta["filename"], width='stretch')
+                ab_c1.image(sample_src, caption=sample_meta["filename"], width='stretch')
                 ab_c2.markdown(
                     f"**Ảnh mẫu đang chọn:** `{sample_meta['filename']}` (ID #{sample_meta['image_id']})\n\n"
                     "So sánh sự thay đổi của kết quả Top-1 và điểm tương đồng khi chỉ bật từng nhóm đặc trưng hoặc loại bỏ lần lượt F1, F2, F3, F4."
@@ -1120,8 +1137,32 @@ with tab_history:
                     "Độ tương đồng": f"{r['top5'][0]['similarity']*100:.1f}%" if len(r["top5"]) > 0 else "N/A",
                     "Trọng số (w₁..w₄)": weights_str,
                     "Thời gian": f"{r['execution_ms']:.1f} ms",
+                    "Phiên bản": r["version_id"] or "Chưa ghi",
                     "Thời điểm": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r["timestamp"])),
                 })
             st.dataframe(h_table, width='stretch', hide_index=True)
+
+        with st.container(border=True):
+            selected_history = st.selectbox(
+                "🖼️ Xem ảnh của lần truy vấn:",
+                history_records,
+                format_func=lambda record: f"#{record['query_id']} — {record['query_filename']}"
+            )
+            columns = st.columns(1 + max(1, len(selected_history["top5"])))
+            with columns[0]:
+                st.caption("Ảnh truy vấn")
+                if selected_history.get("query_image_data"):
+                    st.image(selected_history["query_image_data"], width='stretch')
+                else:
+                    st.caption("Lần truy vấn cũ chưa lưu nội dung ảnh.")
+            for column, result in zip(columns[1:], selected_history["top5"]):
+                with column:
+                    st.caption(f"#{result['rank']} · {result['filename']} ({result['similarity']*100:.1f}%)")
+                    if result.get("image_data"):
+                        st.image(result["image_data"], width='stretch')
+                    elif _has_media(result.get("image_path")):
+                        st.image(result["image_path"], width='stretch')
+                    else:
+                        st.caption("Ảnh kết quả đã được gỡ khỏi kho.")
     else:
         st.info("Chưa có lịch sử truy vấn nào được ghi nhận trong PostgreSQL.")

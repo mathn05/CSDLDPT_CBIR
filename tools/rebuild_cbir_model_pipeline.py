@@ -22,7 +22,7 @@ from flower_cbir.core.segmentation import clean_mask
 from flower_cbir.services.csv_tools import export_csv
 from flower_cbir.services.database import FlowerDatabase
 from flower_cbir.services.index_dataset import build_or_load_index
-from flower_cbir.services.search import FlowerSearchEngine
+from flower_cbir.services.search import FlowerSearchEngine, gallery_image, gallery_mask
 from flower_cbir.settings import load_config
 
 
@@ -48,9 +48,8 @@ def preflight(data: dict) -> None:
         item = data["metadata"][index]
         if item["mask_provenance"] != expected_source:
             raise ValueError(f"Wrong mask provenance: {item['filename']}")
-        result = engine.search(item["image_path"])
-        with Image.open(item["mask_path"]) as saved:
-            expected_mask = clean_mask(np.asarray(saved.convert("L")))
+        result = engine.search(gallery_image(item))
+        expected_mask = gallery_mask(item)
         if (not np.array_equal(result["query_info"]["mask_binary"], expected_mask)
                 or not np.array_equal(result["query_info"]["raw_vector"],
                                       data["raw_features"][index])):
