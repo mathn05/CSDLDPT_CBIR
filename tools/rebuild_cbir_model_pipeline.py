@@ -48,7 +48,7 @@ def preflight(data: dict) -> None:
         item = data["metadata"][index]
         if item["mask_provenance"] != expected_source:
             raise ValueError(f"Wrong mask provenance: {item['filename']}")
-        result = engine.search(item["image_path"], use_gallery_mask=False)
+        result = engine.search(item["image_path"])
         with Image.open(item["mask_path"]) as saved:
             expected_mask = clean_mask(np.asarray(saved.convert("L")))
         if (not np.array_equal(result["query_info"]["mask_binary"], expected_mask)

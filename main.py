@@ -34,7 +34,6 @@ def main():
     parser.add_argument("--app", action="store_true", help="Khởi chạy giao diện web Streamlit")
     parser.add_argument('--evaluate', action='store_true', help='Run reproducible validation/test evaluation and weight selection')
     parser.add_argument('--verify-sync', action='store_true', help='Verify bitwise parity of DeepLabV3, query, CSV and PostgreSQL')
-    parser.add_argument('--flower-box',nargs=4,type=float,metavar=('X','Y','WIDTH','HEIGHT'),help='Flower bounding box; expanded by 1.10 and padded per report')
 
     args = parser.parse_args()
     if args.verify_sync:
@@ -89,7 +88,7 @@ def main():
             return
         engine = FlowerSearchEngine()
         print(f"[Main] Đang truy vấn ảnh: {img_path.name}...")
-        res = engine.search(img_path,flower_box=args.flower_box)
+        res = engine.search(img_path)
         print(f"\n--- KẾT QUẢ TOP 5 (Thời gian xử lý: {res['timings']['total_backend_ms']:.1f}ms) ---")
         for item in res["results"]:
             print(f"Rank #{item['rank']}: {item['filename']} | Similarity: {item['similarity']*100:.1f}% | Distance: {item['distance']:.4f}")

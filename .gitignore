@@ -1,41 +1,47 @@
-# Byte-compiled / optimized / DLL files
+# Machine-specific configuration and credentials
+database.local.json
+*.local.json
+.env
+.env.*
+!.env.example
+
+# Local environments, IDE state and Python caches
+.venv/
+.idea/
+.vscode/
 __pycache__/
 *.py[cod]
 *$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
-# C extensions
-*.so
+# Local-only tests and diagnostics
+/tests/
+/test_*.py
+/check_*.py
+/debug_*.py
+/profile_*.py
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
 
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# Virtual Environments
-.venv/
-venv/
-ENV/
-env/
-
-# Environment variables & local configuration
-.env
-database.local.json
-
-# Temporary files & logs
-tmp/
+# Generated reports, temporary documents, logs and recovery snapshots
+/output/
+/tmp/
+/reports/
+/notes/
+*.local.md
 *.log
+*.tmp
+*.bak
 .DS_Store
 Thumbs.db
+
+# Runtime artifacts and large weights supplied/generated locally
+/flower_cbir/models/*.pt
+/flower_cbir/models/segmentation_training/
+/flower_cbir/data/training_reference/
+
+

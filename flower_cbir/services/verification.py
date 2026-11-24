@@ -45,8 +45,7 @@ def verify_synchronization():
         if index<result['verified_through']:
             continue
         try:
-            query=engine.search(item['image_path'],top_k=min(5,engine.num_images),
-                                use_gallery_mask=False)
+            query=engine.search(item['image_path'])
             info=query['query_info']
             saved_mask=np.asarray(Image.open(item['mask_path']).convert('L'))
             exporter=np.concatenate(extract_one(info['image_rgb'],info['mask_binary'])).astype(np.float32)

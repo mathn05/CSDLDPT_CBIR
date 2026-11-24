@@ -44,14 +44,15 @@ def extraction_contract():
     if source_pdf.is_file() and file_sha256(source_pdf)!=report_info['source_sha256']:
         raise ValueError('The source report changed. Review the algorithms before creating a new extraction contract.')
     if segmentation['method'] == 'deeplabv3plus_v2':
+        model_config = PROJECT_ROOT / segmentation['active_model_config']
         selected = {
             'method': 'deeplabv3plus_384_v2_finetuned',
-            'checkpoint_sha256': file_sha256(segmentation['checkpoint']),
-            'active_model_config_sha256': file_sha256(segmentation['active_model_config']),
-            'postprocessing_sha256': file_sha256(segmentation['postprocessing_path']),
-            'worker_sha256': file_sha256(segmentation['worker']),
-            'model_loader_sha256': file_sha256(Path(segmentation['active_model_config']).with_suffix('.py')),
-            'architecture_sha256': file_sha256(Path(segmentation['active_model_config']).with_name('train_flower_deeplabv3plus.py')),
+            'checkpoint_sha256': file_sha256(PROJECT_ROOT / segmentation['checkpoint']),
+            'active_model_config_sha256': file_sha256(model_config),
+            'postprocessing_sha256': file_sha256(PROJECT_ROOT / segmentation['postprocessing_path']),
+            'worker_sha256': file_sha256(PROJECT_ROOT / segmentation['worker']),
+            'model_loader_sha256': file_sha256(model_config.with_suffix('.py')),
+            'architecture_sha256': file_sha256(model_config.with_name('train_flower_deeplabv3plus.py')),
             'postprocessing': segmentation['postprocessing'],
             'device': segmentation['device'], 'precision': 'float32',
             'input_size': 384, 'output_size': 384,

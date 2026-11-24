@@ -126,17 +126,27 @@ def publish_index(repository, data, *, replace_all=False, backup_artifact=None):
                 INSERT INTO cbir_index_versions (version_id,normalization_id,contract,manifest,normalizer)
                 VALUES (%s,%s,%s,%s,%s)
             ''',(data['version_id'],normalization_id,Jsonb(contract),Jsonb(data['manifest']),Jsonb(data['normalizer'].to_dict())))
+        # Earlier installations store image paths and PostgreSQL arrays only.
+        columns = set(connection.execute(
+            "SELECT table_name, column_name FROM information_schema.columns WHERE table_schema=%s",
+            (repository.schema,)
+        ).fetchall())
+        store_images = ('flower_images', 'image_data') in columns
+        store_masks = ('flower_masks', 'mask_data') in columns
+        store_embeddings = ('normalized_features', 'pgvector_embedding') in columns
         for index,item in enumerate(metadata):
-            identity = connection.execute('''
-                INSERT INTO flower_images (filename,image_path,mask_path,width,height,image_format,image_data)
-                VALUES (%s,%s,%s,384,384,%s,%s)
+            image_params = [item['filename'], _relative(item['image_path']), _relative(item['mask_path']),
+                            Path(item['image_path']).suffix.lstrip('.').upper()]
+            if store_images:
+                image_params.append(Path(item['image_path']).read_bytes())
+            identity = connection.execute(f'''
+                INSERT INTO flower_images (filename,image_path,mask_path,width,height,image_format{",image_data" if store_images else ""})
+                VALUES (%s,%s,%s,384,384,%s{",%s" if store_images else ""})
                 ON CONFLICT (filename) DO UPDATE SET image_path=EXCLUDED.image_path,
-                    mask_path=EXCLUDED.mask_path,width=384,height=384,image_format=EXCLUDED.image_format,
-                    image_data=EXCLUDED.image_data
+                    mask_path=EXCLUDED.mask_path,width=384,height=384,image_format=EXCLUDED.image_format
+                    {",image_data=EXCLUDED.image_data" if store_images else ""}
                 RETURNING image_id
-            ''',(item['filename'],_relative(item['image_path']),_relative(item['mask_path']),
-                 Path(item['image_path']).suffix.lstrip('.').upper(),
-                 Path(item['image_path']).read_bytes())).fetchone()[0]
+            ''', image_params).fetchone()[0]
             connection.execute('''
                 INSERT INTO flower_features (image_id,hs_histogram,v_histogram,lab_mean,lab_std,lbp_histogram,
                     circularity,solidity,aspect_ratio,rotated_extent,radial_spectrum,iap,iep)
@@ -147,21 +157,26 @@ def publish_index(repository, data, *, replace_all=False, backup_artifact=None):
                     aspect_ratio=EXCLUDED.aspect_ratio,rotated_extent=EXCLUDED.rotated_extent,
                     radial_spectrum=EXCLUDED.radial_spectrum,iap=EXCLUDED.iap,iep=EXCLUDED.iep,extracted_at=CURRENT_TIMESTAMP
             ''',(identity,*feature_columns(raw[index])))
-            connection.execute('''
-                INSERT INTO flower_masks (image_id,mask_data,mask_format,mask_sha256,source_version)
-                VALUES (%s,%s,'PNG',%s,%s)
-                ON CONFLICT (image_id) DO UPDATE SET mask_data=EXCLUDED.mask_data,
-                    mask_format=EXCLUDED.mask_format,mask_sha256=EXCLUDED.mask_sha256,
-                    source_version=EXCLUDED.source_version,updated_at=CURRENT_TIMESTAMP
-            ''',(identity,Path(item['mask_path']).read_bytes(),item['mask_sha256'],
-                 item['mask_provenance']))
-            connection.execute('''
-                INSERT INTO normalized_features (image_id,normalization_id,normalized_vector,pgvector_embedding)
-                VALUES (%s,%s,%s,%s::vector(163))
+            if store_masks:
+                connection.execute('''
+                    INSERT INTO flower_masks (image_id,mask_data,mask_format,mask_sha256,source_version)
+                    VALUES (%s,%s,'PNG',%s,%s)
+                    ON CONFLICT (image_id) DO UPDATE SET mask_data=EXCLUDED.mask_data,
+                        mask_format=EXCLUDED.mask_format,mask_sha256=EXCLUDED.mask_sha256,
+                        source_version=EXCLUDED.source_version,updated_at=CURRENT_TIMESTAMP
+                ''',(identity,Path(item['mask_path']).read_bytes(),item['mask_sha256'],
+                     item['mask_provenance']))
+            vector = normalized[index].tolist()
+            params = [identity, normalization_id, vector]
+            if store_embeddings:
+                params.append(vector)
+            connection.execute(f'''
+                INSERT INTO normalized_features (image_id,normalization_id,normalized_vector{",pgvector_embedding" if store_embeddings else ""})
+                VALUES (%s,%s,%s{",%s::vector(163)" if store_embeddings else ""})
                 ON CONFLICT (image_id) DO UPDATE SET normalization_id=EXCLUDED.normalization_id,
-                    normalized_vector=EXCLUDED.normalized_vector,
-                    pgvector_embedding=EXCLUDED.pgvector_embedding,created_at=CURRENT_TIMESTAMP
-            ''',(identity,normalization_id,normalized[index].tolist(),normalized[index].tolist()))
+                    normalized_vector=EXCLUDED.normalized_vector,created_at=CURRENT_TIMESTAMP
+                    {",pgvector_embedding=EXCLUDED.pgvector_embedding" if store_embeddings else ""}
+            ''', params)
             record = {**item,'image_id':identity,'image_path':_relative(item['image_path']),
                       'mask_path':_relative(item['mask_path'])}
             connection.execute('''
@@ -172,9 +187,9 @@ def publish_index(repository, data, *, replace_all=False, backup_artifact=None):
                                    (data['version_id'],)).fetchone()[0]
         if count != len(metadata):
             raise ValueError('Incomplete immutable version; refusing activation.')
-        actual = connection.execute('''
-            SELECT i.filename,e.raw_vector,e.normalized_vector,n.normalized_vector,
-                   n.pgvector_embedding::real[]
+        actual = connection.execute(f'''
+            SELECT i.filename,e.raw_vector,e.normalized_vector,n.normalized_vector
+                   {',n.pgvector_embedding::real[]' if store_embeddings else ''}
             FROM cbir_index_entries e JOIN flower_images i ON i.image_id=e.image_id
             JOIN normalized_features n ON n.image_id=i.image_id AND n.normalization_id=%s
             WHERE e.version_id=%s
@@ -184,8 +199,8 @@ def publish_index(repository, data, *, replace_all=False, backup_artifact=None):
             not np.array_equal(raw[positions[name]],np.asarray(rv,np.float32)) or
             not np.array_equal(normalized[positions[name]],np.asarray(nv,np.float32)) or
             not np.array_equal(normalized[positions[name]],np.asarray(legacy_nv,np.float32)) or
-            not np.array_equal(normalized[positions[name]],np.asarray(pgvector_nv,np.float32))
-            for name,rv,nv,legacy_nv,pgvector_nv in actual):
+            any(not np.array_equal(normalized[positions[name]],np.asarray(v,np.float32)) for v in embeddings)
+            for name,rv,nv,legacy_nv,*embeddings in actual):
             raise ValueError('Database round-trip differs from the staged batch; activation refused.')
         # Check the contract again before committing a potentially long import.
         verify_contract(contract)

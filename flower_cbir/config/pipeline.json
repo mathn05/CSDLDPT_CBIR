@@ -7,7 +7,7 @@
     384
   ],
   "dataset": {
-    "image_dir": "D:\\CSDLDPT\\image_384",
+    "image_dir": "../postgres_data/image_384",
     "mask_dir": "flower_cbir/data/deeplab_masks",
     "reviewed_mask_dir": "D:\\CSDLDPT\\final_segmentation_v2",
     "expected_count": 1000,
@@ -26,11 +26,11 @@
     ],
     "iter_count": 5,
     "seed": 42,
-    "checkpoint": "D:\\CSDLDPT\\cau_3\\deeplabv3plus_384_v2_finetuned\\best_deeplabv3plus.pt",
-    "active_model_config": "D:\\CSDLDPT\\cau_3\\active_deeplab_model.json",
-    "postprocessing_path": "D:\\CSDLDPT\\cau_3\\mask_postprocessing.py",
-    "worker": "D:\\CSDLDPT\\cau_3\\cbir_deeplabv3plus_worker.py",
-    "python_executable": "C:\\Users\\Admin\\AppData\\Local\\Programs\\Python\\Python313\\python.exe",
+    "checkpoint": "cau_3/deeplabv3plus_384_v2_finetuned/best_deeplabv3plus.pt",
+    "active_model_config": "cau_3/active_deeplab_model.json",
+    "postprocessing_path": "cau_3/mask_postprocessing.py",
+    "worker": "cau_3/cbir_deeplabv3plus_worker.py",
+    "python_executable": "../deeplabv3/.venv/Scripts/python.exe",
     "device": "cpu",
     "postprocessing": {
       "threshold": 0.45,

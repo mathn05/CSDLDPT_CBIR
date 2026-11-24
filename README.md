@@ -44,7 +44,7 @@ htdpt/
 │   │   └── features.py                # Tính toán 4 nhóm đặc trưng
 │   ├── services/                      # Tầng dịch vụ hệ thống
 │   │   ├── database.py                # Quản lý kết nối và truy vấn PostgreSQL
-│   │   ├── search.py                  # Lõi xếp hạng Top-K tương đồng
+│   │   ├── search.py                  # Lõi xếp hạng Top 5 tương đồng
 │   │   ├── index_store.py             # Xuất bản và xác thực chỉ mục vào DB
 │   │   └── verification.py            # Kiểm thử tính toàn vẹn hệ thống
 │   └── evaluation/                    # Đánh giá độ đo truy hồi (Precision/Recall)
@@ -121,7 +121,7 @@ Khởi chạy ứng dụng Streamlit tìm kiếm ảnh hoa tương đồng:
 python main.py --app
 ```
 Giao diện sẽ tự động mở trên trình duyệt tại địa chỉ `http://localhost:8501`. Người dùng có thể:
-- Tải lên ảnh hoa bất kỳ để tự động tách nền và trích rút vector.
+- Tải lên ảnh hoa mới ngoài cơ sở dữ liệu, kích thước 384×384 pixel, bông hoa nằm chính giữa và đúng tỷ lệ. Hệ thống phân đoạn trực tiếp trên ảnh này và trích rút vector 163 chiều.
 - Điều chỉnh 4 thanh trượt trọng số $w_1, w_2, w_3, w_4$ theo nhu cầu tìm kiếm (Màu sắc, Bố cục vành, Kết cấu, Hình dạng).
 - Nhận về Top 5 bông hoa tương đồng nhất kèm khoảng cách chi tiết và lịch sử truy vấn.
 
