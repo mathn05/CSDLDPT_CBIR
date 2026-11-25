@@ -70,6 +70,25 @@ def _schema_columns(connection, schema):
     ).fetchall())
 
 
+def require_grouped_normalization(columns):
+    expected = {
+        ('feature_normalization', f'f{group}_{stat}')
+        for group in range(1, 5) for stat in ('means', 'stds')
+    } | {('normalized_features', f'f{group}_vector') for group in range(1, 5)}
+    missing = sorted(expected - columns)
+    if missing:
+        names = ', '.join(f'{table}.{column}' for table, column in missing)
+        raise ValueError(f'Grouped F1-F4 normalization columns are required: {names}')
+
+
+def relative_image_path(filename):
+    """Portable database path relative to the CBIR repository."""
+    name = Path(filename).name
+    if name != filename:
+        raise ValueError('Gallery filenames must not include directory components.')
+    return (Path('image_384') / name).as_posix()
+
+
 class FlowerDatabase:
     """Read a verified active snapshot; publish all gallery tables atomically."""
 
@@ -96,8 +115,7 @@ class FlowerDatabase:
         with self.lock, self.conn.transaction():
             self.conn.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY')
             columns = _schema_columns(self.conn, self.schema)
-            grouped_norm_stats = ('feature_normalization', 'f1_means') in columns
-            grouped_norm_vec = ('normalized_features', 'f1_vector') in columns
+            require_grouped_normalization(columns)
             has_bytea_media = ('flower_images', 'image_data') in columns and ('flower_masks', 'mask_data') in columns
             has_paths = ('flower_images', 'image_path') in columns and ('flower_images', 'mask_path') in columns
 
@@ -105,26 +123,18 @@ class FlowerDatabase:
                 SELECT version_id,normalization_id,contract,manifest,normalizer
                 FROM cbir_index_versions WHERE active
             ''').fetchone()
-            if grouped_norm_stats:
-                saved_stats = self.conn.execute('''
-                    SELECT f1_means || f2_means || f3_means || f4_means,
-                           f1_stds || f2_stds || f3_stds || f4_stds
-                    FROM feature_normalization WHERE normalization_id=%s
-                ''', (normalization_id,)).fetchone()
-            else:
-                saved_stats = self.conn.execute('''
-                    SELECT feature_means,feature_stds FROM feature_normalization WHERE normalization_id=%s
-                ''', (normalization_id,)).fetchone()
+            saved_stats = self.conn.execute('''
+                SELECT f1_means || f2_means || f3_means || f4_means,
+                       f1_stds || f2_stds || f3_stds || f4_stds
+                FROM feature_normalization WHERE normalization_id=%s
+            ''', (normalization_id,)).fetchone()
 
             img_data_expr = 'i.image_data' if has_bytea_media else 'NULL::bytea'
             mask_data_expr = 'm.mask_data' if has_bytea_media else 'NULL::bytea'
             img_path_expr = 'i.image_path' if has_paths else 'NULL::text'
             mask_path_expr = 'i.mask_path' if has_paths else 'NULL::text'
             masks_join = 'LEFT JOIN flower_masks m ON m.image_id=i.image_id' if has_bytea_media else ''
-            norm_vec_expr = (
-                'n.f1_vector || n.f2_vector || n.f3_vector || n.f4_vector'
-                if grouped_norm_vec else 'n.normalized_vector'
-            )
+            norm_vec_expr = 'n.f1_vector || n.f2_vector || n.f3_vector || n.f4_vector'
             rows = self.conn.execute(f'''
                 SELECT i.image_id,i.filename,{img_data_expr},{mask_data_expr},{img_path_expr},{mask_path_expr},
                        f.hs_histogram,f.v_histogram,f.lab_mean,f.lab_std,f.lbp_histogram,

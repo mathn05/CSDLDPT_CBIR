@@ -12,6 +12,7 @@ from psycopg.types.json import Jsonb
 from flower_cbir.core.contract import fingerprint, verify_contract
 from flower_cbir.core.schema import feature_columns, validate_features, GROUP_SLICES
 from flower_cbir.settings import PROJECT_ROOT
+from flower_cbir.services.database import require_grouped_normalization, relative_image_path
 
 
 def backup_database(repository):
@@ -91,6 +92,9 @@ def publish_index(repository, data, *, replace_all=False, backup_artifact=None):
             if not payload or hashlib.sha256(payload).hexdigest() != item[kind + '_sha256']:
                 raise ValueError(f'Source changed since extraction: {item["filename"]}, {kind}')
             payloads[kind] = payload
+        canonical_image = PROJECT_ROOT / relative_image_path(item['filename'])
+        if not canonical_image.is_file() or hashlib.sha256(canonical_image.read_bytes()).hexdigest() != item['image_sha256']:
+            raise ValueError(f'image_384 does not contain the indexed image: {item["filename"]}')
         media_payloads.append(payloads)
         if item.get('mask_provenance') not in ('deeplabv3', 'reviewed_final_segmentation_v2',
                                                 'deeplabv3plus_v2_postprocessed'):
@@ -117,12 +121,10 @@ def publish_index(repository, data, *, replace_all=False, backup_artifact=None):
             "SELECT table_name, column_name FROM information_schema.columns WHERE table_schema=%s",
             (repository.schema,)
         ).fetchall())
-        grouped_norm_stats = ('feature_normalization', 'f1_means') in columns
+        require_grouped_normalization(columns)
         has_image_paths = ('flower_images', 'image_path') in columns and ('flower_images', 'mask_path') in columns
         store_images = ('flower_images', 'image_data') in columns
         store_masks = ('flower_masks', 'mask_data') in columns
-        grouped_norm_vec = ('normalized_features', 'f1_vector') in columns
-        has_legacy_norm_vec = ('normalized_features', 'normalized_vector') in columns
         store_embeddings = ('normalized_features', 'pgvector_embedding') in columns
 
         if replace_all:
@@ -144,20 +146,14 @@ def publish_index(repository, data, *, replace_all=False, backup_artifact=None):
             if previous_manifest['fingerprint'] != data['manifest']['fingerprint']:
                 raise ValueError('An immutable version ID was reused for different data.')
         else:
-            if grouped_norm_stats:
-                normalization_id = connection.execute('''
-                    INSERT INTO feature_normalization
-                        (method,f1_means,f1_stds,f2_means,f2_stds,f3_means,f3_stds,f4_means,f4_stds)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING normalization_id
-                ''', ('report1_f2f4_zscore', *[
-                    values[part].tolist() for part in GROUP_SLICES
-                    for values in (data['normalizer'].mean, data['normalizer'].std)
-                ])).fetchone()[0]
-            else:
-                normalization_id = connection.execute('''
-                    INSERT INTO feature_normalization (method,feature_means,feature_stds)
-                    VALUES (%s,%s,%s) RETURNING normalization_id
-                ''', ('report1_f2f4_zscore', data['normalizer'].mean.tolist(), data['normalizer'].std.tolist())).fetchone()[0]
+            normalization_id = connection.execute('''
+                INSERT INTO feature_normalization
+                    (method,f1_means,f1_stds,f2_means,f2_stds,f3_means,f3_stds,f4_means,f4_stds)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING normalization_id
+            ''', ('report1_f2f4_zscore', *[
+                values[part].tolist() for part in GROUP_SLICES
+                for values in (data['normalizer'].mean, data['normalizer'].std)
+            ])).fetchone()[0]
             connection.execute('''
                 INSERT INTO cbir_index_versions (version_id,normalization_id,contract,manifest,normalizer)
                 VALUES (%s,%s,%s,%s,%s)
@@ -173,7 +169,7 @@ def publish_index(repository, data, *, replace_all=False, backup_artifact=None):
                 img_vals.extend(['%s', '%s'])
                 img_updates.extend(['image_path=EXCLUDED.image_path', 'mask_path=EXCLUDED.mask_path'])
                 img_params.extend([
-                    _relative(item['image_path']) if item.get('image_path') else item['filename'],
+                    relative_image_path(item['filename']),
                     _relative(item['mask_path']) if item.get('mask_path') else (Path(item['filename']).stem + '.png'),
                 ])
             if store_images:
@@ -213,19 +209,13 @@ def publish_index(repository, data, *, replace_all=False, backup_artifact=None):
             norm_vals = ['%s', '%s']
             norm_updates = ['normalization_id=EXCLUDED.normalization_id', 'created_at=CURRENT_TIMESTAMP']
             norm_params = [identity, normalization_id]
-            if grouped_norm_vec:
-                norm_cols.extend(['f1_vector', 'f2_vector', 'f3_vector', 'f4_vector'])
-                norm_vals.extend(['%s', '%s', '%s', '%s'])
-                norm_updates.extend([
-                    'f1_vector=EXCLUDED.f1_vector', 'f2_vector=EXCLUDED.f2_vector',
-                    'f3_vector=EXCLUDED.f3_vector', 'f4_vector=EXCLUDED.f4_vector',
-                ])
-                norm_params.extend([normalized[index, part].tolist() for part in GROUP_SLICES])
-            if has_legacy_norm_vec:
-                norm_cols.append('normalized_vector')
-                norm_vals.append('%s')
-                norm_updates.append('normalized_vector=EXCLUDED.normalized_vector')
-                norm_params.append(normalized[index].tolist())
+            norm_cols.extend(['f1_vector', 'f2_vector', 'f3_vector', 'f4_vector'])
+            norm_vals.extend(['%s', '%s', '%s', '%s'])
+            norm_updates.extend([
+                'f1_vector=EXCLUDED.f1_vector', 'f2_vector=EXCLUDED.f2_vector',
+                'f3_vector=EXCLUDED.f3_vector', 'f4_vector=EXCLUDED.f4_vector',
+            ])
+            norm_params.extend([normalized[index, part].tolist() for part in GROUP_SLICES])
             if store_embeddings:
                 norm_cols.append('pgvector_embedding')
                 norm_vals.append('%s::vector(163)')
@@ -240,9 +230,9 @@ def publish_index(repository, data, *, replace_all=False, backup_artifact=None):
             record = {key: value for key, value in item.items()
                       if key not in ('image_data', 'mask_data')}
             record['image_id'] = identity
-            for key in ('image_path', 'mask_path'):
-                if record.get(key):
-                    record[key] = _relative(record[key])
+            record['image_path'] = relative_image_path(item['filename'])
+            if record.get('mask_path'):
+                record['mask_path'] = _relative(record['mask_path'])
             connection.execute('''
                 INSERT INTO cbir_index_entries (version_id,image_id,raw_vector,normalized_vector,metadata)
                 VALUES (%s,%s,%s,%s,%s) ON CONFLICT (version_id,image_id) DO NOTHING
@@ -252,10 +242,7 @@ def publish_index(repository, data, *, replace_all=False, backup_artifact=None):
                                    (data['version_id'],)).fetchone()[0]
         if count != len(metadata):
             raise ValueError('Incomplete immutable version; refusing activation.')
-        check_norm_expr = (
-            'n.f1_vector || n.f2_vector || n.f3_vector || n.f4_vector'
-            if grouped_norm_vec else 'n.normalized_vector'
-        )
+        check_norm_expr = 'n.f1_vector || n.f2_vector || n.f3_vector || n.f4_vector'
         actual = connection.execute(f'''
             SELECT i.filename,e.raw_vector,e.normalized_vector,{check_norm_expr}
                    {',n.pgvector_embedding::real[]' if store_embeddings else ''}
