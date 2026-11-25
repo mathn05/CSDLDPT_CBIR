@@ -7,7 +7,7 @@
     384
   ],
   "dataset": {
-    "image_dir": "../postgres_data/image_384",
+    "image_dir": "image_384",
     "mask_dir": "flower_cbir/data/deeplab_masks",
     "reviewed_mask_dir": "D:\\CSDLDPT\\final_segmentation_v2",
     "expected_count": 1000,
