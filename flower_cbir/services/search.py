@@ -1,27 +1,19 @@
 import time
 import hashlib
-from io import BytesIO
 from PIL import Image
 import numpy as np
 
 from flower_cbir.core.preprocess import load_image
 from flower_cbir.core.distance import compute_overall_distance
-from flower_cbir.settings import default_weights, validate_weights, load_config
-from flower_cbir.core.deeplab import run_deeplab
-from flower_cbir.core.features import extract_all_features
-from flower_cbir.core.contract import verify_contract
+from flower_cbir.settings import default_weights, validate_weights
+from flower_cbir.core.pipeline import extract_image
+from flower_cbir.core.contract import file_sha256, verify_contract
 from flower_cbir.core.segmentation import clean_mask
 
 
-def gallery_image(record):
-    """Use PostgreSQL image bytes, or a file for a disk-built offline index."""
-    return record.get('image_data') or record.get('image_path')
-
-
 def gallery_mask(record):
-    """Decode a binary mask in the same coordinates as the prepared RGB image."""
-    source = BytesIO(record['mask_data']) if record.get('mask_data') else record['mask_path']
-    with Image.open(source) as image:
+    """Load and clean the binary mask file for a gallery image."""
+    with Image.open(record['mask_path']) as image:
         return clean_mask(np.asarray(image.convert('L')))
 
 
@@ -56,11 +48,9 @@ class FlowerSearchEngine:
         if not np.isfinite(self.raw_matrix).all() or not np.isfinite(self.normalized_matrix).all():
             raise ValueError('Index contains nonfinite values.')
         self.image_ids = np.array([item['image_id'] for item in self.metadata])
-        self.metadata_by_id = {item['image_id']: item for item in self.metadata}
         self.pixel_lookup = {item['pixel_sha256']: item for item in self.metadata if 'pixel_sha256' in item}
 
-    def match_source(self, source):
-        image = load_image(source)
+    def match_source(self, image):
         if image.shape != (384, 384, 3):
             return None
         return self.pixel_lookup.get(hashlib.sha256(image.tobytes()).hexdigest())
@@ -141,7 +131,7 @@ class FlowerSearchEngine:
             'results': results,
             'weights': list(weights),
             'timings': {
-                'preprocess_ms': 0.0,
+                'decode_ms': 0.0,
                 'segmentation_ms': 0.0,
                 'extraction_ms': 0.0,
                 'normalization_ms': 0.0,
@@ -152,30 +142,31 @@ class FlowerSearchEngine:
         }
 
     def search(self, query_source, weights=None):
-        """Retrieve top 5 similar flowers for a new, centered 384 x 384 image."""
+        """Rank the gallery using the reviewed mask for an exact image match or DeepLab for a new image."""
         if self.contract is not None:
             verify_contract(self.contract)
-            from flower_cbir.core.deeplab import get_segmenter
-            if get_segmenter().info != self.manifest['model_runtime']:
-                raise ValueError('DeepLabV3+ runtime differs from this index. Synchronize before querying.')
         weights = default_weights() if weights is None else validate_weights(weights)
         total_start = time.perf_counter()
         rgb = load_image(query_source)
-        if rgb.shape[:2] != (384, 384):
-            raise ValueError('Ảnh truy vấn phải có kích thước 384×384 pixel.')
-        timings = {'preprocess_ms': (time.perf_counter() - total_start) * 1000}
-        t0 = time.perf_counter()
-        mask, overlay, model_info = run_deeplab(rgb)
-        timings['segmentation_ms'] = (time.perf_counter() - t0) * 1000
-        t0 = time.perf_counter()
-        raw_vector, explanation = extract_all_features(rgb, mask)
-        timings['extraction_ms'] = (time.perf_counter() - t0) * 1000
-        query_info = {
-            'image_rgb': rgb, 'mask_binary': mask, 'overlay': overlay,
-            'raw_vector': raw_vector, 'explanation': explanation,
-            'preparation': {'source_size': [384, 384], 'crop_bounds': None},
-            'segmentation': {'method': load_config()['segmentation']['method'], **model_info},
-        }
+        record = self.match_source(rgb)
+        decode_ms = (time.perf_counter() - total_start) * 1000
+        mask_start = time.perf_counter()
+        mask = None
+        if record is not None:
+            if file_sha256(record['mask_path']) != record['mask_sha256']:
+                raise ValueError('Gallery mask changed. Rebuild the index.')
+            mask = gallery_mask(record)
+        mask_read_ms = (time.perf_counter() - mask_start) * 1000
+        query_info = extract_image(rgb, supplied_mask=mask)
+        if record is not None:
+            query_info['segmentation'] = {'method': record['mask_provenance'], 'filename': record['filename']}
+        elif self.contract:
+            runtime = self.manifest['model_runtime']
+            if any(query_info['segmentation'].get(key) != value for key, value in runtime.items()):
+                raise ValueError('Query model runtime differs from the indexed model.')
+        timings = query_info.pop('timings')
+        timings['decode_ms'] += decode_ms
+        timings['segmentation_ms'] += mask_read_ms
         t0 = time.perf_counter()
         norm_vector = self.normalizer.transform(query_info['raw_vector'])
         timings["normalization_ms"] = (time.perf_counter() - t0) * 1000.0

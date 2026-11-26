@@ -1,10 +1,17 @@
 import json
+import os
 from pathlib import Path
 
 import numpy as np
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = PROJECT_ROOT / 'flower_cbir/config/pipeline.json'
+
+
+def relative_project_path(path):
+    """Serialize paths relative to the repository, independently of the working directory."""
+    resolved = (PROJECT_ROOT / path).resolve()
+    return Path(os.path.relpath(resolved, PROJECT_ROOT)).as_posix()
 
 
 def load_config():
@@ -15,8 +22,6 @@ def load_config():
         raise ValueError('The report fixes erosion to one 5x5 ellipse with zero outside the image.')
     if config['epsilon'] != 1e-12:
         raise ValueError('The report fixes epsilon to 1e-12.')
-    if config.get('preprocessing') != {'crop_margin':1.10,'padding_rgb':[128,128,128],'prepared_size':[384,384]}:
-        raise ValueError('The report fixes square crop margin to 1.10, neutral gray padding, RGB 384x384.')
     validate_weights(tuple(config['distance']['weights'].values()))
     return config
 

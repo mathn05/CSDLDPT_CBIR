@@ -28,9 +28,7 @@ class DeepLabSegmenter:
         log = PROJECT_ROOT / 'output/logs/deeplab_worker.log'
         log.parent.mkdir(parents=True, exist_ok=True)
         self.log_stream = log.open('a', encoding='utf-8')
-        worker = (PROJECT_ROOT / config['worker']
-                  if config['method'] == 'deeplabv3plus_v2'
-                  else Path(__file__).with_name('deeplab_worker.py'))
+        worker = PROJECT_ROOT / config['worker']
         if not worker.is_file():
             raise FileNotFoundError(f'Missing segmentation worker: {worker}')
         command = [self.executable, '-u', str(worker),
@@ -103,7 +101,7 @@ def _get_segmenter(configuration):
 def get_segmenter():
     from flower_cbir.core.contract import file_sha256
     config = load_config()['segmentation']
-    if config['method'] not in ('deeplabv3', 'deeplabv3plus_v2'):
+    if config['method'] != 'deeplabv3plus_v2':
         raise ValueError('Unsupported segmentation method; no silent fallback is allowed.')
     config['_checkpoint_sha256'] = file_sha256(PROJECT_ROOT / config['checkpoint'])
     key=json.dumps(config,sort_keys=True)

@@ -1,36 +1,26 @@
 {
-  "pipeline_version": "3.2.0-unified-deeplabv3plus-v2",
+  "pipeline_version": "3.3.0-reviewed-v2",
   "name": "flower_cbir_163d",
-  "description": "Unified DeepLabV3+ v2 and mask postprocessing for gallery and query, followed by report 1 features and normalization",
+  "description": "Reviewed gallery masks with DeepLabV3+ for missing masks and new queries",
   "image_size": [
     384,
     384
   ],
   "dataset": {
-    "image_dir": "image_384",
-    "mask_dir": "flower_cbir/data/deeplab_masks",
-    "reviewed_mask_dir": "D:\\CSDLDPT\\final_segmentation_v2",
+    "image_dir": "dataset/images",
+    "mask_dir": "dataset/masks",
     "expected_count": 1000,
-    "labels_mat": "../imagelabels.mat",
+    "labels_mat": "dataset/imagelabels.mat",
     "label_provenance": "provisional_filename_mapping",
-    "reference_mask_dir": "D:\\CSDLDPT\\final_segmentation_v2",
-    "mask_source": "deeplabv3plus_v2_postprocessed"
+    "mask_source": "final_segmentation_v2_or_deeplab"
   },
   "segmentation": {
     "method": "deeplabv3plus_v2",
-    "initial_rect": [
-      8,
-      8,
-      368,
-      368
-    ],
-    "iter_count": 5,
-    "seed": 42,
-    "checkpoint": "cau_3/deeplabv3plus_384_v2_finetuned/best_deeplabv3plus.pt",
-    "active_model_config": "cau_3/active_deeplab_model.json",
-    "postprocessing_path": "cau_3/mask_postprocessing.py",
-    "worker": "cau_3/cbir_deeplabv3plus_worker.py",
-    "python_executable": "../deeplabv3/.venv/Scripts/python.exe",
+    "checkpoint": "flower_cbir/model/deeplabv3plus_384_v2_finetuned/best_deeplabv3plus.pt",
+    "active_model_config": "flower_cbir/model/active_deeplab_model.json",
+    "postprocessing_path": "flower_cbir/model/mask_postprocessing.py",
+    "worker": "flower_cbir/model/worker.py",
+    "python_executable": ".venv-deeplab/Scripts/python.exe",
     "device": "cpu",
     "postprocessing": {
       "threshold": 0.45,
@@ -142,17 +132,5 @@
     "f3_method": "hellinger_avg",
     "f4_method": "block_rms_avg"
   },
-  "epsilon": 1e-12,
-  "preprocessing": {
-    "crop_margin": 1.1,
-    "padding_rgb": [
-      128,
-      128,
-      128
-    ],
-    "prepared_size": [
-      384,
-      384
-    ]
-  }
+  "epsilon": 1e-12
 }

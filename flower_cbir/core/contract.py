@@ -33,43 +33,34 @@ def fingerprint(payload):
 def extraction_contract():
     config = load_config()
     segmentation = config['segmentation']
-    if segmentation['method'] not in ('deeplabv3', 'deeplabv3plus_v2'):
+    if segmentation['method'] != 'deeplabv3plus_v2':
         raise ValueError('Unsupported segmentation method.')
     files = ['features.py', 'geometry.py', 'schema.py', 'segmentation.py',
-             'preprocess.py', 'pipeline.py', 'deeplab.py', 'deeplab_worker.py',
+             'preprocess.py', 'pipeline.py', 'deeplab.py',
              'normalization.py', 'contract.py']
     report = PROJECT_ROOT / 'flower_cbir/config/report_contract.json'
     report_info=json.loads(report.read_text(encoding='utf-8'))
-    source_pdf=PROJECT_ROOT.parent/'doc'/report_info['source_pdf']
+    source_pdf = PROJECT_ROOT / report_info['source_pdf']
     if source_pdf.is_file() and file_sha256(source_pdf)!=report_info['source_sha256']:
         raise ValueError('The source report changed. Review the algorithms before creating a new extraction contract.')
-    if segmentation['method'] == 'deeplabv3plus_v2':
-        model_config = PROJECT_ROOT / segmentation['active_model_config']
-        selected = {
-            'method': 'deeplabv3plus_384_v2_finetuned',
-            'checkpoint_sha256': file_sha256(PROJECT_ROOT / segmentation['checkpoint']),
-            'active_model_config_sha256': file_sha256(model_config),
-            'postprocessing_sha256': file_sha256(PROJECT_ROOT / segmentation['postprocessing_path']),
-            'worker_sha256': file_sha256(PROJECT_ROOT / segmentation['worker']),
-            'model_loader_sha256': file_sha256(model_config.with_suffix('.py')),
-            'architecture_sha256': file_sha256(model_config.with_name('train_flower_deeplabv3plus.py')),
-            'postprocessing': segmentation['postprocessing'],
-            'device': segmentation['device'], 'precision': 'float32',
-            'input_size': 384, 'output_size': 384,
-            'gallery_mask_source': config['dataset']['mask_source'],
-        }
-    else:
-        selected = {'method': 'deeplabv3_resnet50',
-                    'checkpoint_sha256': file_sha256(PROJECT_ROOT/segmentation['checkpoint']),
-                    'device': segmentation['device'], 'precision': 'float32',
-                    'normalization_mean': [.485, .456, .406],
-                    'normalization_std': [.229, .224, .225],
-                    'deterministic': True, 'decision': 'argmax_2classes'}
+    model_config = PROJECT_ROOT / segmentation['active_model_config']
+    selected = {
+        'method': 'deeplabv3plus_384_v2_finetuned',
+        'checkpoint_sha256': file_sha256(PROJECT_ROOT / segmentation['checkpoint']),
+        'active_model_config_sha256': file_sha256(model_config),
+        'postprocessing_sha256': file_sha256(PROJECT_ROOT / segmentation['postprocessing_path']),
+        'worker_sha256': file_sha256(PROJECT_ROOT / segmentation['worker']),
+        'model_loader_sha256': file_sha256(model_config.with_suffix('.py')),
+        'architecture_sha256': file_sha256(model_config.with_name('deeplabv3plus.py')),
+        'postprocessing': segmentation['postprocessing'],
+        'device': segmentation['device'], 'precision': 'float32',
+        'input_size': 384, 'output_size': 384,
+        'gallery_mask_source': config['dataset']['mask_source'],
+    }
     return {
         'extractor_version': EXTRACTOR_VERSION, 'pipeline_version': config['pipeline_version'],
         'feature_names': FEATURE_NAMES, 'dtype': 'float32', 'image_size': config['image_size'],
         'epsilon': config['epsilon'], 'geometry': config['geometry'],
-        'preprocessing': config['preprocessing'],
         'report': report_info,
         'source_sha256': {**{name: file_sha256(PROJECT_ROOT/'flower_cbir/core'/name) for name in files},
                           'settings.py':file_sha256(PROJECT_ROOT/'flower_cbir/settings.py')},

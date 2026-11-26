@@ -1,12 +1,10 @@
--- Group F1-F4 normalization arrays and use image_384/ relative to the repo.
--- Back up the database before running. Example:
--- psql -U postgres -d flower_retrieval -v ON_ERROR_STOP=1 -f database/migrations/20261125_grouped_normalization.sql
--- The recipient must supply the real image_384 folder inside CSDLDPT_CBIR.
+-- Group F1-F4 normalization arrays and use repository-relative gallery paths.
+-- Back up the database before running.
 -- Existing masks, raw features, index snapshots, history and Z-score values are preserved.
 
 BEGIN;
 SELECT pg_advisory_xact_lock(hashtext('cbir_publish_index'));
-LOCK TABLE feature_normalization, normalized_features, flower_images IN ACCESS EXCLUSIVE MODE;
+LOCK TABLE feature_normalization, normalized_features, flower_images, retrieval_history IN ACCESS EXCLUSIVE MODE;
 
 DO $migration$
 DECLARE
@@ -73,6 +71,9 @@ ALTER TABLE feature_normalization
     DROP COLUMN IF EXISTS feature_means,
     DROP COLUMN IF EXISTS feature_stds;
 ALTER TABLE normalized_features DROP COLUMN IF EXISTS normalized_vector;
+ALTER TABLE flower_images DROP COLUMN IF EXISTS image_data;
+ALTER TABLE retrieval_history DROP COLUMN IF EXISTS query_image_data;
+DROP TABLE IF EXISTS flower_masks;
 
-UPDATE flower_images SET image_path='image_384/' || filename;
+UPDATE flower_images SET image_path = 'dataset/images/' || filename;
 COMMIT;

@@ -7,6 +7,7 @@ database.local.json
 
 # Local environments, IDE state and Python caches
 .venv/
+.venv-deeplab/
 venv/
 ENV/
 env/
@@ -24,38 +25,24 @@ dist/
 .mypy_cache/
 .ruff_cache/
 
-# Local-only tests and diagnostics
-/tests/
-/test_*.py
-/check_*.py
-/debug_*.py
-/profile_*.py
+# Test and coverage output
 .coverage
 .coverage.*
 coverage.xml
 htmlcov/
 
-# Generated reports, local report drafts, temporary documents and logs
+# Generated files and local working data
 /output/
 /tmp/
 /reports/
 /notes/
 /BAO_CAO_*.md
-*.local.md
+/flower_cbir/data/
+/.playwright-mcp/
+/*.pdf
+*.backup
 *.log
 *.tmp
 *.bak
 .DS_Store
 Thumbs.db
-
-# Runtime artifacts and large weights supplied/generated locally
-/flower_cbir/models/*.pt
-/flower_cbir/models/segmentation_training/
-/flower_cbir/data/training_reference/
-/.venv-deeplab/
-/.playwright-mcp/
-/flower_cbir/data/query_uploads/
-/flower_cbir/data/versions/
-/flower_cbir/data/active_index.json
-/*.pdf
-*.backup
