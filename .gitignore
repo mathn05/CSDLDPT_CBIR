@@ -52,3 +52,10 @@ Thumbs.db
 /flower_cbir/models/*.pt
 /flower_cbir/models/segmentation_training/
 /flower_cbir/data/training_reference/
+/.venv-deeplab/
+/.playwright-mcp/
+/flower_cbir/data/query_uploads/
+/flower_cbir/data/versions/
+/flower_cbir/data/active_index.json
+/*.pdf
+*.backup

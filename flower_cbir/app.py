@@ -701,7 +701,7 @@ with tab_search:
         with up_col1:
             uploaded_file = st.file_uploader(
                 "📤 Tải lên ảnh bông hoa truy vấn (kích thước chuẩn 384×384 pixel, bông hoa nằm giữa khung hình)",
-                type=["jpg", "jpeg", "png"],
+                type=["jpg", "jpeg", "png", "webp"],
             )
         with up_col2:
             st.markdown("**Quy chuẩn đầu vào**")
